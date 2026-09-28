@@ -55,6 +55,7 @@ function labelToTypstMath(text) {
 function ExportAsTypst() {
   this._points = [];
   this._data = "";
+  this.lineWidth = 1; // set by drawUsing()
   this._scale = 0.02; // pixels -> cm (CeTZ's default unit); 30px radius = 0.6cm
 
   // json: optional snapshot string, embedded as a comment so the diagram
@@ -67,10 +68,15 @@ function ExportAsTypst() {
       header +
       '#import "@preview/cetz:0.4.2"\n' +
       "\n" +
-      "#align(center, cetz.canvas({\n" +
+      "#align(center, text(size: " +
+      fixed(styleFontSize * 0.55, 2) +
+      "pt, cetz.canvas({\n" +
       "  import cetz.draw: *\n" +
+      "  set-style(stroke: (thickness: " +
+      fixed(this.lineWidth, 2) +
+      "pt))\n" +
       this._data +
-      "}))\n"
+      "})))\n"
     );
   };
 
@@ -157,7 +163,7 @@ function ExportAsTypst() {
 
   this.measureText = function (text) {
     var c = canvas.getContext("2d");
-    c.font = '20px "Times New Roman", serif';
+    c.font = styleFontSize + 'px "Times New Roman", serif';
     return c.measureText(text);
   };
 
@@ -180,10 +186,10 @@ function ExportAsTypst() {
       } else {
         if (dy > 0) {
           anchor = "north";
-          y -= 10;
+          y -= styleFontSize / 2;
         } else {
           anchor = "south";
-          y += 10;
+          y += styleFontSize / 2;
         }
       }
     }

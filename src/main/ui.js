@@ -135,6 +135,7 @@ function wireUI() {
   bindExport(pngBtn, saveAsPNG);
   bindExport(svgBtn, saveAsSVG);
   bindExport(latexBtn, saveAsLaTeX);
+  if (typeof wireStyleUI === "function") wireStyleUI();
   bindExport(document.getElementById("btn-typst"), saveAsTypst);
 
   function updateThemeButton() {

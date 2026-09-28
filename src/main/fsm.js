@@ -72,8 +72,10 @@ function drawArrow(c, x, y, angle) {
   var dy = Math.sin(angle);
   c.beginPath();
   c.moveTo(x, y);
-  c.lineTo(x - 8 * dx + 5 * dy, y - 8 * dy - 5 * dx);
-  c.lineTo(x - 8 * dx - 5 * dy, y - 8 * dy + 5 * dx);
+  var a = styleArrowSize;
+  var b = (a * 5) / 8;
+  c.lineTo(x - a * dx + b * dy, y - a * dy - b * dx);
+  c.lineTo(x - a * dx - b * dy, y - a * dy + b * dx);
   c.fill();
 }
 
@@ -83,7 +85,7 @@ function canvasHasFocus() {
 
 function drawText(c, originalText, x, y, angleOrNull, isSelected) {
   text = convertLatexShortcuts(originalText);
-  c.font = '20px "Times New Roman", serif';
+  c.font = styleFontSize + 'px "Times New Roman", serif';
   var width = c.measureText(text).width;
 
   // center the text
@@ -94,7 +96,7 @@ function drawText(c, originalText, x, y, angleOrNull, isSelected) {
     var cos = Math.cos(angleOrNull);
     var sin = Math.sin(angleOrNull);
     var cornerPointX = (width / 2 + 5) * (cos > 0 ? 1 : -1);
-    var cornerPointY = (10 + 5) * (sin > 0 ? 1 : -1);
+    var cornerPointY = (styleFontSize / 2 + 5) * (sin > 0 ? 1 : -1);
     var slide =
       sin * Math.pow(Math.abs(sin), 40) * cornerPointX -
       cos * Math.pow(Math.abs(cos), 10) * cornerPointY;
@@ -108,12 +110,12 @@ function drawText(c, originalText, x, y, angleOrNull, isSelected) {
   } else {
     x = Math.round(x);
     y = Math.round(y);
-    c.fillText(text, x, y + 6);
+    c.fillText(text, x, y + styleFontSize * 0.3);
     if (isSelected && caretVisible && canvasHasFocus() && document.hasFocus()) {
       x += width;
       c.beginPath();
-      c.moveTo(x, y - 10);
-      c.lineTo(x, y + 10);
+      c.moveTo(x, y - styleFontSize / 2);
+      c.lineTo(x, y + styleFontSize / 2);
       c.stroke();
     }
   }
@@ -161,19 +163,19 @@ function drawUsing(c, colors) {
   c.translate(0.5, 0.5);
 
   for (var i = 0; i < nodes.length; i++) {
-    c.lineWidth = 1;
+    c.lineWidth = styleLineWidth;
     c.fillStyle = c.strokeStyle =
       nodes[i] == selectedObject ? colors.selected : colors.fg;
     nodes[i].draw(c);
   }
   for (var i = 0; i < links.length; i++) {
-    c.lineWidth = 1;
+    c.lineWidth = styleLineWidth;
     c.fillStyle = c.strokeStyle =
       links[i] == selectedObject ? colors.selected : colors.fg;
     links[i].draw(c);
   }
   if (currentLink != null) {
-    c.lineWidth = 1;
+    c.lineWidth = styleLineWidth;
     c.fillStyle = c.strokeStyle = colors.fg;
     currentLink.draw(c);
   }

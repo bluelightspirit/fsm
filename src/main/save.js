@@ -2,7 +2,7 @@
 // Reads/writes the active FSM via Workspace.
 
 function serializeState() {
-  var data = { nodes: [], links: [] };
+  var data = { nodes: [], links: [], style: getStyle() };
   for (var i = 0; i < nodes.length; i++) {
     var node = nodes[i];
     data.nodes.push({
@@ -57,6 +57,8 @@ function deserializeState(data) {
   links.length = 0;
   selectedObject = null;
   if (!data || !data.nodes) return;
+  applyStyle(data.style, false);
+  if (typeof syncStyleInputs === "function") syncStyleInputs();
   for (var i = 0; i < data.nodes.length; i++) {
     var bn = data.nodes[i];
     var node = new Node(bn.x, bn.y);
