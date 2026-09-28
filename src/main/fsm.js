@@ -85,7 +85,9 @@ function canvasHasFocus() {
 
 function drawText(c, originalText, x, y, angleOrNull, isSelected) {
   text = convertLatexShortcuts(originalText);
-  c.font = styleFontSize + 'px "Times New Roman", serif';
+  // state labels are drawn without an angle, line labels with one
+  var fontSize = angleOrNull == null ? styleStateFontSize : styleLinkFontSize;
+  c.font = styleFontCSS(fontSize);
   var width = c.measureText(text).width;
 
   // center the text
@@ -96,7 +98,7 @@ function drawText(c, originalText, x, y, angleOrNull, isSelected) {
     var cos = Math.cos(angleOrNull);
     var sin = Math.sin(angleOrNull);
     var cornerPointX = (width / 2 + 5) * (cos > 0 ? 1 : -1);
-    var cornerPointY = (styleFontSize / 2 + 5) * (sin > 0 ? 1 : -1);
+    var cornerPointY = (fontSize / 2 + 5) * (sin > 0 ? 1 : -1);
     var slide =
       sin * Math.pow(Math.abs(sin), 40) * cornerPointX -
       cos * Math.pow(Math.abs(cos), 10) * cornerPointY;
@@ -110,12 +112,12 @@ function drawText(c, originalText, x, y, angleOrNull, isSelected) {
   } else {
     x = Math.round(x);
     y = Math.round(y);
-    c.fillText(text, x, y + styleFontSize * 0.3);
+    c.fillText(text, x, y + fontSize * 0.3);
     if (isSelected && caretVisible && canvasHasFocus() && document.hasFocus()) {
       x += width;
       c.beginPath();
-      c.moveTo(x, y - styleFontSize / 2);
-      c.lineTo(x, y + styleFontSize / 2);
+      c.moveTo(x, y - fontSize / 2);
+      c.lineTo(x, y + fontSize / 2);
       c.stroke();
     }
   }
@@ -163,7 +165,7 @@ function drawUsing(c, colors) {
   c.translate(0.5, 0.5);
 
   for (var i = 0; i < nodes.length; i++) {
-    c.lineWidth = styleLineWidth;
+    c.lineWidth = styleStateLineWidth;
     c.fillStyle = c.strokeStyle =
       nodes[i] == selectedObject ? colors.selected : colors.fg;
     nodes[i].draw(c);
@@ -186,6 +188,7 @@ function drawUsing(c, colors) {
 function draw() {
   drawUsing(canvas.getContext("2d"));
   saveBackup();
+  if (typeof refreshNamesPanel === "function") refreshNamesPanel();
 }
 
 function selectObject(x, y) {

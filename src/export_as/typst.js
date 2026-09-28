@@ -68,15 +68,10 @@ function ExportAsTypst() {
       header +
       '#import "@preview/cetz:0.4.2"\n' +
       "\n" +
-      "#align(center, text(size: " +
-      fixed(styleFontSize * 0.55, 2) +
-      "pt, cetz.canvas({\n" +
+      "#align(center, cetz.canvas({\n" +
       "  import cetz.draw: *\n" +
-      "  set-style(stroke: (thickness: " +
-      fixed(this.lineWidth, 2) +
-      "pt))\n" +
       this._data +
-      "})))\n"
+      "}))\n"
     );
   };
 
@@ -98,7 +93,9 @@ function ExportAsTypst() {
         this._pt(x, y, 3) +
         ", radius: " +
         fixed(radius, 3) +
-        ")\n";
+        ", stroke: " +
+        fixed(this.lineWidth, 2) +
+        "pt)\n";
       return;
     }
     if (isReversed) {
@@ -132,7 +129,9 @@ function ExportAsTypst() {
       fixed(((endAngle - startAngle) * 180) / Math.PI, 5) +
       "deg, radius: " +
       fixed(radius, 3) +
-      ")\n";
+      ", stroke: " +
+      fixed(this.lineWidth, 2) +
+      "pt)\n";
   };
 
   this.moveTo = this.lineTo = function (x, y) {
@@ -149,7 +148,12 @@ function ExportAsTypst() {
 
   this.stroke = function () {
     if (this._points.length < 2) return;
-    this._data += "  line(" + this._pointList() + ")\n";
+    this._data +=
+      "  line(" +
+      this._pointList() +
+      ", stroke: " +
+      fixed(this.lineWidth, 2) +
+      "pt)\n";
   };
 
   // only used for arrowheads
@@ -163,7 +167,7 @@ function ExportAsTypst() {
 
   this.measureText = function (text) {
     var c = canvas.getContext("2d");
-    c.font = styleFontSize + 'px "Times New Roman", serif';
+    c.font = styleFontCSS(styleLinkFontSize);
     return c.measureText(text);
   };
 
@@ -186,10 +190,10 @@ function ExportAsTypst() {
       } else {
         if (dy > 0) {
           anchor = "north";
-          y -= styleFontSize / 2;
+          y -= styleLinkFontSize / 2;
         } else {
           anchor = "south";
-          y += styleFontSize / 2;
+          y += styleLinkFontSize / 2;
         }
       }
     }
@@ -198,9 +202,13 @@ function ExportAsTypst() {
     this._data +=
       "  content(" +
       this._pt(x, y, 3) +
-      ", $" +
+      ", text(font: " +
+      JSON.stringify(styleFontName) +
+      ", size: " +
+      fixed((angleOrNull == null ? styleStateFontSize : styleLinkFontSize) * 0.55, 2) +
+      "pt, $" +
       labelToTypstMath(originalText) +
-      '$, anchor: "' +
+      '$), anchor: "' +
       anchor +
       '")\n';
   };
