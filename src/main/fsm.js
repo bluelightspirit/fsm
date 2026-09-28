@@ -270,6 +270,7 @@ function draw() {
   saveBackup();
   if (typeof refreshNamesPanel === "function") refreshNamesPanel();
   if (typeof syncPagesUI === "function") syncPagesUI();
+  if (typeof refreshAutomataPanel === "function") refreshAutomataPanel();
 }
 
 function selectObject(x, y, extraTolerance, preferLinks) {

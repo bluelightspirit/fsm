@@ -14,6 +14,8 @@ Live original: <http://madebyevan.com/fsm/>
 - **Clear current FSM** — wipe one diagram with a confirm; the action itself is undoable.
 - **Light / Dark / Auto theme** — defaults to your OS color scheme via `prefers-color-scheme`. Cycle the toolbar button (`◐ Auto → ☀ Light → ☾ Dark`); your choice persists.
 - **Exports** — PNG, SVG, and LaTeX (TikZ). Exports always render in pure black on a transparent background, regardless of your theme, so they drop cleanly into any document.
+- **DFA/NFA analysis** — inspect determinism, completeness, reachability, dead states, missing transitions, and ε-transitions in the right panel. NFA subset construction creates a separate DFA in the workspace.
+- **Lean checking** — optionally verify the graph’s finite transition model with PyPantograph from the right panel.
 - **LaTeX‑style text shortcuts** — type `\beta` for β, `S_0` for S₀, etc.
 - **Keyboard shortcuts** — see below.
 - **Auto‑save** — every edit persists to `localStorage` instantly.
@@ -61,6 +63,18 @@ python3 build.py --watch
 cd www && python3 -m http.server 8000
 # then open http://localhost:8000
 ```
+
+### Optional Lean / PyPantograph setup
+
+The app works without Lean. To enable **Check with Lean**, install Lean 4 through `elan` and PyPantograph in the same Python 3.11+ environment used to run `server.py`:
+
+```bash
+python3.11 -m pip install -r requirements-lean.txt
+```
+
+On Windows, use `py -3.11 -m pip install -r requirements-lean.txt`; on macOS/Linux, use `python3.11`. Start `server.py` with that same interpreter. Restart it after installation. The browser sends the current states, start/accept markers, alphabet, and transition labels to the local Python endpoint; PyPantograph asks Lean to type-check and prove the generated finite-model invariants. See the [official PyPantograph install instructions](https://github.com/stanford-centaur/PyPantograph#installation) for platform details. On Windows, WSL is recommended for Lean toolchains.
+
+The current analyzer does not yet include regex conversion, DFA minimization, step-by-step word simulation, or a transition-table editor. The alphabet is inferred from arrow labels unless entered explicitly in the right panel.
 
 ---
 
@@ -113,3 +127,4 @@ MIT. Original copyright © 2010 Evan Wallace. See the header in `src/_license.js
 
 - Original design and implementation: [Evan Wallace](http://madebyevan.com/) — <http://madebyevan.com/fsm/>
 - This fork (multi‑FSM, undo/redo, theming, refreshed UI): [Moeein Aali](https://github.com/MoeeinAali)
+- The automaton property checklist and conversion workflow were informed by [Automata Studio](https://github.com/ReyEscarlata0/automata-studio) (MIT-licensed); this project uses its own implementation.

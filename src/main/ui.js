@@ -140,6 +140,7 @@ function wireUI() {
   if (typeof wireExportOptionsUI === "function") wireExportOptionsUI();
   if (typeof wireImportUI === "function") wireImportUI();
   if (typeof wirePagesUI === "function") wirePagesUI();
+  if (typeof wireAutomataUI === "function") wireAutomataUI();
   if (typeof addCreditLine === "function") addCreditLine();
   bindExport(document.getElementById("btn-typst"), saveAsTypst);
 

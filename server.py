@@ -15,6 +15,10 @@ import subprocess
 import sys
 import threading
 import time
+import json
+from urllib.parse import urlparse
+
+from lean_integration import check_with_pypantograph
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WWW = os.path.join(ROOT, "www")
@@ -49,6 +53,31 @@ def watch():
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    def _send_json(self, status, payload):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        if urlparse(self.path).path != "/api/lean/check":
+            self._send_json(404, {"error": "Not found"})
+            return
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+            if size <= 0 or size > 512_000:
+                self._send_json(413, {"error": "Request must be between 1 byte and 512 KB"})
+                return
+            payload = json.loads(self.rfile.read(size).decode("utf-8"))
+            result = check_with_pypantograph(payload)
+            self._send_json(200, {"lean": result})
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            self._send_json(400, {"error": str(exc)})
+        except Exception as exc:
+            self._send_json(500, {"error": str(exc)[:1000]})
+
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")  # no more hard refreshes
         super().end_headers()

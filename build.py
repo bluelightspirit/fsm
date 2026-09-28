@@ -8,8 +8,8 @@ def sources():
 
 def build():
 	path = './www/fsm.js'
-	data = '\n'.join(open(file, 'r').read() for file in sources())
-	with open(path, 'w') as f:
+	data = '\n'.join(open(file, 'r', encoding='utf-8').read() for file in sources())
+	with open(path, 'w', encoding='utf-8') as f:
 		f.write(data)
 	print('built %s (%u bytes)' % (path, len(data)))
 
