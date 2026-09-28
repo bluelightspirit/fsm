@@ -3,31 +3,15 @@
 
 // Convert the editor's label shortcuts (\alpha, q_0, "abc") into Typst math.
 // Multi-letter runs must be quoted in Typst math or they parse as variables.
-function labelToTypstMath(text) {
+// Convert one plain run (no subscripts) of display text into Typst math.
+// Multi-letter runs must be quoted in Typst math or they parse as variables.
+function typstMathRun(text) {
   var out = [];
   var i = 0;
   while (i < text.length) {
     var ch = text.charAt(i);
     var rest = text.slice(i);
     var m;
-
-    if (ch === "\\" && (m = /^\\([A-Za-z]+)/.exec(rest))) {
-      var name = m[1];
-      var cap = name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
-      var idx = greekLetterNames.indexOf(cap);
-      if (idx >= 0 && (name === cap || name === cap.toLowerCase())) {
-        // same code points the canvas uses, so the export matches the screen
-        var base = name === cap ? 913 : 945;
-        out.push(String.fromCharCode(base + idx + (idx > 16 ? 1 : 0)));
-        i += m[0].length;
-        continue;
-      }
-    }
-    if (ch === "_" && (m = /^_(\d+)/.exec(rest))) {
-      out.push("_(" + m[1] + ")");
-      i += m[0].length;
-      continue;
-    }
     if ((m = /^[A-Za-z]+/.exec(rest))) {
       out.push(m[0].length === 1 ? m[0] : '"' + m[0] + '"');
       i += m[0].length;
@@ -43,13 +27,25 @@ function labelToTypstMath(text) {
     } else if (ch === ",") {
       out.push(",");
     } else if (ch.charCodeAt(0) > 0x7f) {
-      out.push(ch); // real unicode symbols are valid in Typst math
+      out.push(ch); // unicode symbols (including Greek) are valid in Typst math
     } else {
       out.push('"' + ch.replace(/["\\]/g, "\\$&") + '"');
     }
     i++;
   }
-  return out.join(" ").replace(/ _\(/g, "_(");
+  return out.join(" ");
+}
+
+// Subscripts become one _(...) attached to what came before, so they never nest.
+function labelToTypstMath(text) {
+  var segs = labelSegments(text);
+  var out = "";
+  for (var i = 0; i < segs.length; i++) {
+    var body = typstMathRun(segs[i].t);
+    if (segs[i].sub) out += (out === "" ? '""' : "") + "_(" + body + ")";
+    else out += (out === "" ? "" : " ") + body;
+  }
+  return out;
 }
 
 function ExportAsTypst() {

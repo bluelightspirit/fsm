@@ -141,7 +141,7 @@ function ExportAsLaTeX() {
         ") node " +
         nodeParams +
         "{$" +
-        originalText.replace(/ /g, "\\mbox{ }") +
+        labelToLatexMath(originalText) +
         "$};\n";
     }
   };

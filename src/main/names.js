@@ -85,7 +85,8 @@ function wireNamesUI() {
   if (document.getElementById("names-panel")) return;
   var panel = document.createElement("div");
   panel.id = "names-panel";
-  panel.style.cssText = "margin:10px 0;font-size:0.85rem;";
+  panel.style.cssText =
+    "margin:10px 0;font-size:0.85rem;width:100%;flex-basis:100%;box-sizing:border-box;";
   var title = document.createElement("div");
   title.textContent = "States & arrows (type to rename)";
   title.style.cssText = "font-weight:600;margin-bottom:4px;";
@@ -95,12 +96,7 @@ function wireNamesUI() {
   panel.appendChild(title);
   panel.appendChild(list);
 
-  var anchor = document.getElementById("style-panel");
-  if (!anchor) {
-    var btn = document.getElementById("btn-typst") || document.getElementById("btn-latex");
-    anchor = btn ? btn.parentNode : null;
-  }
-  if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(panel, anchor.nextSibling);
-  else canvas.parentNode.appendChild(panel);
+  // directly below the diagram
+  canvas.parentNode.insertBefore(panel, canvas.nextSibling);
   refreshNamesPanel();
 }

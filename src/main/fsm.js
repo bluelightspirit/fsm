@@ -88,7 +88,9 @@ function drawText(c, originalText, x, y, angleOrNull, isSelected) {
   // state labels are drawn without an angle, line labels with one
   var fontSize = angleOrNull == null ? styleStateFontSize : styleLinkFontSize;
   c.font = styleFontCSS(fontSize);
-  var width = c.measureText(text).width;
+  var segs = labelSegments(originalText);
+  text = segs.map(function (s) { return s.t; }).join("");
+  var width = richTextWidth(c, segs, fontSize);
 
   // center the text
   x -= width / 2;
@@ -112,7 +114,7 @@ function drawText(c, originalText, x, y, angleOrNull, isSelected) {
   } else {
     x = Math.round(x);
     y = Math.round(y);
-    c.fillText(text, x, y + fontSize * 0.3);
+    drawRichSegments(c, segs, x, y + fontSize * 0.3, fontSize);
     if (isSelected && caretVisible && canvasHasFocus() && document.hasFocus()) {
       x += width;
       c.beginPath();
