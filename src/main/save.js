@@ -2,7 +2,7 @@
 // Reads/writes the active FSM via Workspace.
 
 function serializeState() {
-  var data = { nodes: [], links: [], style: getStyle() };
+  var data = { nodes: [], links: [], style: getStyle(), pages: pageCount, pageSize: pageSizeKey, margins: pageMarginsForExport(), constrainToMargins: constrainToMargins };
   for (var i = 0; i < nodes.length; i++) {
     var node = nodes[i];
     data.nodes.push({
@@ -45,6 +45,7 @@ function serializeState() {
         lineAngleAdjust: link.lineAngleAdjust,
         parallelPart: link.parallelPart,
         perpendicularPart: link.perpendicularPart,
+        curvePoints: link.curvePoints,
       };
     }
     if (backupLink) data.links.push(backupLink);
@@ -58,6 +59,10 @@ function deserializeState(data) {
   selectedObject = null;
   if (!data || !data.nodes) return;
   applyStyle(data.style, false);
+  setPageSize(data.pageSize || "letter", false);
+  setPageCount(data.pages || 1);
+  setPageMargins(data.margins || PAGE_MARGIN_PRESETS.apa, false);
+  setConstrainToMargins(data.constrainToMargins !== false, false);
   if (typeof syncStyleInputs === "function") syncStyleInputs();
   for (var i = 0; i < data.nodes.length; i++) {
     var bn = data.nodes[i];
@@ -86,6 +91,7 @@ function deserializeState(data) {
       link = new Link(nodes[bl.nodeA], nodes[bl.nodeB]);
       link.parallelPart = bl.parallelPart;
       link.perpendicularPart = bl.perpendicularPart;
+      link.curvePoints = Array.isArray(bl.curvePoints) ? bl.curvePoints : null;
       link.text = bl.text;
       link.labelDx = bl.labelDx || 0;
       link.labelDy = bl.labelDy || 0;
@@ -93,6 +99,8 @@ function deserializeState(data) {
     }
     if (link) links.push(link);
   }
+  if (constrainToMargins) nodes.forEach(function (node) { constrainNodeToMargins(node); });
+  if (typeof draw === "function") draw();
 }
 
 function snapshotJSON() {

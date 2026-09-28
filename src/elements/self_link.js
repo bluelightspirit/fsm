@@ -79,10 +79,10 @@ SelfLink.prototype.draw = function (c) {
   drawArrow(c, stuff.endX, stuff.endY, stuff.endAngle + Math.PI * 0.4);
 };
 
-SelfLink.prototype.containsPoint = function (x, y) {
+SelfLink.prototype.containsPoint = function (x, y, extraTolerance) {
   var stuff = this.getEndPointsAndCircle();
   var dx = x - stuff.circleX;
   var dy = y - stuff.circleY;
   var distance = Math.sqrt(dx * dx + dy * dy) - stuff.circleRadius;
-  return Math.abs(distance) < hitTargetPadding;
+  return Math.abs(distance) < hitTargetPadding + (extraTolerance || 0);
 };

@@ -40,6 +40,20 @@ function copyToClipboard(text) {
 	return Promise.resolve(fallback());
 }
 
+function copyPNGCanvasToClipboard(sourceCanvas) {
+	if (!navigator.clipboard || !navigator.clipboard.write || typeof ClipboardItem === 'undefined' || !sourceCanvas || !sourceCanvas.toBlob) {
+		return Promise.resolve(false);
+	}
+	try {
+		var imageBlob = new Promise(function (resolve) {
+			sourceCanvas.toBlob(function (blob) { resolve(blob); }, 'image/png');
+		});
+		return navigator.clipboard.write([new ClipboardItem({ 'image/png': imageBlob })]).then(
+			function () { return true; }, function () { return false; }
+		);
+	} catch (e) { return Promise.resolve(false); }
+}
+
 function downloadBlob(filename, content, mime) {
 	try {
 		var blob = new Blob([content], { type: mime || 'application/octet-stream' });

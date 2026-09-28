@@ -63,7 +63,7 @@ StartLink.prototype.draw = function (c) {
   drawArrow(c, stuff.endX, stuff.endY, Math.atan2(-this.deltaY, -this.deltaX));
 };
 
-StartLink.prototype.containsPoint = function (x, y) {
+StartLink.prototype.containsPoint = function (x, y, extraTolerance) {
   var stuff = this.getEndPoints();
   var dx = stuff.endX - stuff.startX;
   var dy = stuff.endY - stuff.startY;
@@ -71,5 +71,5 @@ StartLink.prototype.containsPoint = function (x, y) {
   var percent =
     (dx * (x - stuff.startX) + dy * (y - stuff.startY)) / (length * length);
   var distance = (dx * (y - stuff.startY) - dy * (x - stuff.startX)) / length;
-  return percent > 0 && percent < 1 && Math.abs(distance) < hitTargetPadding;
+  return percent > 0 && percent < 1 && Math.abs(distance) < hitTargetPadding + (extraTolerance || 0);
 };

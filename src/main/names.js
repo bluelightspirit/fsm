@@ -19,11 +19,11 @@ function buildNamesRow(obj) {
   row.style.cssText = "display:flex;align-items:center;gap:6px;padding:2px 4px;border-radius:6px;";
   var desc = document.createElement("span");
   desc.style.cssText =
-    "flex:0 0 96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:0.7;";
+    "flex:0 0 120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:0.7;";
   var input = document.createElement("input");
   input.type = "text";
   input.placeholder = links.indexOf(obj) >= 0 ? "arrow label" : "state name";
-  input.style.cssText = "flex:1;min-width:0;";
+  input.style.cssText = "flex:1;min-width:0;font-size:1.1rem;padding:4px 8px;";
   input.addEventListener("focus", function () {
     selectedObject = obj;
     draw();
@@ -86,10 +86,10 @@ function wireNamesUI() {
   var panel = document.createElement("div");
   panel.id = "names-panel";
   panel.style.cssText =
-    "margin:10px 0;font-size:0.85rem;width:100%;flex-basis:100%;box-sizing:border-box;";
+    "margin:10px 0;font-size:1rem;width:100%;flex-basis:100%;box-sizing:border-box;";
   var title = document.createElement("div");
   title.textContent = "States & arrows (type to rename)";
-  title.style.cssText = "font-weight:600;margin-bottom:4px;";
+  title.style.cssText = "font-weight:600;font-size:1.1rem;margin-bottom:6px;";
   var list = document.createElement("div");
   list.id = "names-list";
   list.style.cssText = "max-height:220px;overflow:auto;";

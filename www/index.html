@@ -556,11 +556,16 @@
           <div class="help-grid">
             <ul>
               <li><b>Add a state:</b> double-click on the canvas</li>
-              <li><b>Add an arrow:</b> shift-drag on the canvas</li>
+              <li><b>Add an arrow:</b> Shift-drag from one state to another, or Shift-click the source and click the destination</li>
+              <li><b>Select something:</b> click it once</li>
               <li><b>Move something:</b> drag it around</li>
+              <li><b>Select a thin line:</b> Ctrl+click it (Cmd+click on Mac) for a wider hit area</li>
+              <li><b>Adjust a curve:</b> select its arrow to show three curve handles; move the last handle to the page fragment where the arrowhead should land</li>
               <li><b>Move an arrow's label:</b> select the arrow, then alt-drag (alt-double-click resets it)</li>
+              <li><b>Clear selection:</b> press Escape</li>
               <li><b>Rename:</b> click a state or arrow and type, or use the list below the canvas</li>
-              <li><b>Subscripts:</b> <code>s_1</code> subscripts one character (<code>s_1_2</code> chains), <code>s_{12}</code> subscripts a group, or type <code>\_</code> to start subscripting and <code>\_</code> again to stop</li>
+              <li><b>Finish typing:</b> press Enter, then drag the selected state to move it; press Enter again to resume label typing</li>
+              <li><b>Continue on a new line:</b> press Shift+Enter while typing</li>
               <li>
                 <b>Delete something:</b> select it, press <kbd>Delete</kbd> or
                 <kbd>Cmd/Ctrl</kbd>+<kbd>⌫</kbd>
@@ -568,14 +573,11 @@
             </ul>
             <ul>
               <li><b>Make accept state:</b> double-click an existing state</li>
-              <li>
-                <b>Greek letter:</b> backslash before the name (e.g.
-                <kbd>\beta</kbd>)
-              </li>
-              <li>
-                <b>Subscript:</b> underscore before a digit (e.g.
-                <kbd>S_0</kbd>)
-              </li>
+              <li><b>Subscript:</b> <kbd>s_1</kbd> subscripts one character, <kbd>s_1_2</kbd> chains into one subscript, and <kbd>s_{12}</kbd> keeps grouped subscripts intact. Use <kbd>\_</kbd> for a literal underscore.</li>
+              <li><b>Greek letters:</b> <kbd>\alpha</kbd>, <kbd>\Sigma</kbd>, ... (also inside subscripts, e.g. <kbd>s_\alpha</kbd>)</li>
+              <li><b>Cheat sheets:</b> <a href="https://wch.github.io/latexsheet/" target="_blank" rel="noopener">LaTeX</a> &middot; <a href="https://github.com/mewmew/typst-cheat-sheet" target="_blank" rel="noopener">Typst #1</a> &middot; <a href="https://github.com/christopherkenny/skills/tree/main/skills/latex-to-typst/references" target="_blank" rel="noopener">Typst #2</a></li>
+              <li><b>Official docs:</b> <a href="https://www.latex-project.org/help/documentation/" target="_blank" rel="noopener">LaTeX</a> &middot; <a href="https://typst.app/docs/guides/for-latex-users/" target="_blank" rel="noopener">Typst for LaTeX users</a></li>
+              <li><b>Label formatting:</b> LaTeX commands such as <kbd>\textbf{...}</kbd> and <kbd>\url{...}</kbd> are not supported in labels yet. Support and separate Typst/LaTeX label variants are still undecided.</li>
               <li>
                 <b>Undo / Redo:</b> <kbd>Cmd/Ctrl</kbd>+<kbd>Z</kbd> ·
                 <kbd>Shift</kbd>+<kbd>Cmd/Ctrl</kbd>+<kbd>Z</kbd>
@@ -592,7 +594,7 @@
       Improved &amp; maintained by
       <a href="https://github.com/MoeeinAali" target="_blank" rel="noopener"
         >Moeein Aali</a
-      >
+      > and <a href="https://github.com/bluelightspirit" target="_blank" rel="noopener">Gary Young</a> in 2026
     </footer>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>

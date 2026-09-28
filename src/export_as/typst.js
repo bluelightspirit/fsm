@@ -50,25 +50,76 @@ function labelToTypstMath(text) {
 
 function ExportAsTypst() {
   this._points = [];
+  this._quadratic = null;
   this._data = "";
+  this._nodePages = [];
+  this._activeNodePage = null;
+  this._nodeLayer = false;
+  this._arrowData = "";
+  this._arrowLayer = false;
   this.lineWidth = 1; // set by drawUsing()
-  this._scale = 0.02; // pixels -> cm (CeTZ's default unit); 30px radius = 0.6cm
+  this._scale = 2.54 / 96; // true size: 96 px = 1 inch (CeTZ units are cm)
+  this._append = function (chunk) {
+    if (this._nodeLayer && this._activeNodePage != null) this._nodePages[this._activeNodePage] = (this._nodePages[this._activeNodePage] || "") + chunk;
+    else if (this._arrowLayer) this._arrowData += chunk;
+    else this._data += chunk;
+  };
+  this.beginNodeClip = function (page) { this._nodeLayer = true; this._activeNodePage = page; this._nodePages[page] = ""; };
+  this.endNodeClip = function () { this._nodeLayer = false; this._activeNodePage = null; };
+  this.beginArrowClip = function () { this._arrowLayer = true; this._arrowData = ""; };
+  this.endArrowClip = function () { this._arrowLayer = false; };
+  this.drawCurveHandle = function (x, y, r) {
+    this._append("  circle(" + this._pt(x * this._scale, y * this._scale, 3) + ", radius: " + fixed(r * this._scale, 3) + "cm, fill: white, stroke: black)\n");
+  };
 
   // json: optional snapshot string, embedded as a comment so the diagram
   // can be restored later from the .typ file itself.
-  this.toTypst = function (json) {
+  this.toTypst = function (json, standalone, pages, margins, constrainMargins, pageMode) {
     var header = json
       ? "// fsm-data: " + String(json).replace(/[\r\n]+/g, " ") + "\n"
       : "";
-    return (
-      header +
-      '#import "@preview/cetz:0.4.2"\n' +
-      "\n" +
-      "#align(center, cetz.canvas({\n" +
-      "  import cetz.draw: *\n" +
-      this._data +
-      "}))\n"
-    );
+    pages = Math.max(1, Math.min(20, Math.round(pages || 1)));
+    margins = margins || { top: 1, bottom: 1, left: 1, right: 1 };
+    var pageSize = PAGE_SIZES[pageSizeKey], pw = pageSize.w, ph = pageSize.h;
+    var pwCm = pw * 2.54, phCm = ph * 2.54;
+    var out = header + '#import "@preview/cetz:0.4.2"\n';
+    var pagedMode = pageMode !== false;
+    var totalHeight = ph * pages;
+    var paperName = pageSizeKey === "a4" ? "a4" : "us-letter";
+    out += pagedMode
+      ? "#set page(paper: \"" + paperName + "\", margin: (top: " + margins.top + "in, bottom: " + margins.bottom + "in, left: " + margins.left + "in, right: " + margins.right + "in))\n"
+      : "#set page(width: " + pw.toFixed(4) + "in, height: " + totalHeight.toFixed(4) + "in, margin: 0pt)\n";
+    if (!pagedMode) {
+      out += "#place(top + left)[\n  #box(width: " + pw.toFixed(4) + "in, height: " + totalHeight.toFixed(4) + "in, clip: true)[\n";
+      out += "    #cetz.canvas({\n      import cetz.draw: *\n";
+      out += "      line((0, 0), (" + pwCm.toFixed(3) + ", -" + (phCm * pages).toFixed(3) + "), stroke: rgb(0%, 0%, 0%, 0%))\n";
+      out += this._data.replace(/\n/g, "\n      ");
+      return out + "    })\n  ]\n]\n";
+    }
+    for (var p = 0; p < pages; p++) {
+      if (p) out += "#pagebreak()\n";
+      out += "#place(top + left, dx: -" + margins.left + "in, dy: -" + margins.top + "in)[\n";
+      out += "  #box(width: " + pw.toFixed(4) + "in, height: " + ph.toFixed(4) + "in, clip: true)[\n";
+      function canvasCode(data) {
+        return "#cetz.canvas({\n        import cetz.draw: *\n" +
+          "        line((0, 0), (" + pwCm.toFixed(3) + ", -" + phCm.toFixed(3) + "), stroke: rgb(0%, 0%, 0%, 0%))\n" +
+          data.replace(/\n/g, "\n        ") + "      })";
+      }
+      var nodePageData = this._nodePages[p] || "";
+      if (constrainMargins) {
+        var innerW = pw - margins.left - margins.right;
+        var innerH = ph - margins.top - margins.bottom;
+        out += "    #place(top + left, dx: " + margins.left + "in, dy: " + margins.top + "in)[\n";
+        out += "      #box(width: " + innerW.toFixed(4) + "in, height: " + innerH.toFixed(4) + "in, clip: true)[\n";
+        if (nodePageData) out += "        #place(top + left, dx: -" + margins.left + "in, dy: -" + (p * ph + margins.top) + "in)[" + canvasCode(nodePageData) + "]\n";
+        if (this._arrowData) out += "        #place(top + left, dx: -" + margins.left + "in, dy: -" + (p * ph + margins.top) + "in)[" + canvasCode(this._arrowData) + "]\n";
+        out += "      ]\n    ]\n";
+      } else {
+        out += "    #place(top + left, dy: -" + (p * ph) + "in)[" + canvasCode(nodePageData + this._data + this._arrowData) + "]\n";
+      }
+      out += "  ]\n]\n";
+    }
+    return out;
   };
 
   this._pt = function (x, y, digits) {
@@ -77,6 +128,7 @@ function ExportAsTypst() {
 
   this.beginPath = function () {
     this._points = [];
+    this._quadratic = null;
   };
 
   this.arc = function (x, y, radius, startAngle, endAngle, isReversed) {
@@ -84,14 +136,14 @@ function ExportAsTypst() {
     y *= this._scale;
     radius *= this._scale;
     if (endAngle - startAngle == Math.PI * 2) {
-      this._data +=
+      this._append(
         "  circle(" +
         this._pt(x, y, 3) +
         ", radius: " +
         fixed(radius, 3) +
         ", stroke: " +
-        fixed(this.lineWidth, 2) +
-        "pt)\n";
+        fixed(this.lineWidth * 0.75, 2) +
+        "pt)\n");
       return;
     }
     if (isReversed) {
@@ -114,7 +166,7 @@ function ExportAsTypst() {
     endAngle = -endAngle;
     var sx = x + radius * Math.cos(startAngle);
     var sy = -y + radius * Math.sin(startAngle);
-    this._data +=
+    this._append(
       "  arc((" +
       fixed(sx, 3) +
       ", " +
@@ -126,12 +178,19 @@ function ExportAsTypst() {
       "deg, radius: " +
       fixed(radius, 3) +
       ", stroke: " +
-      fixed(this.lineWidth, 2) +
-      "pt)\n";
+      fixed(this.lineWidth * 0.75, 2) +
+      "pt)\n");
   };
 
   this.moveTo = this.lineTo = function (x, y) {
     this._points.push({ x: x * this._scale, y: y * this._scale });
+  };
+  this.quadraticCurveTo = function (cx, cy, x, y) {
+    this._quadratic = { x: cx * this._scale, y: cy * this._scale };
+    this._points.push({ x: x * this._scale, y: y * this._scale });
+  };
+  this.bezierCurveTo = function (c1x, c1y, c2x, c2y, x, y) {
+    this._points.push({ x: x * this._scale, y: y * this._scale, c1: { x: c1x * this._scale, y: c1y * this._scale }, c2: { x: c2x * this._scale, y: c2y * this._scale } });
   };
 
   this._pointList = function () {
@@ -144,21 +203,37 @@ function ExportAsTypst() {
 
   this.stroke = function () {
     if (this._points.length < 2) return;
-    this._data +=
+    if (this._points.some(function (point) { return !!point.c1; })) {
+      var previous = this._points[0];
+      for (var ci = 1; ci < this._points.length; ci++) {
+        var curvePoint = this._points[ci];
+        if (curvePoint.c1) this._append("  bezier(" + this._pt(previous.x, previous.y, 3) + ", " + this._pt(curvePoint.x, curvePoint.y, 3) + ", " + this._pt(curvePoint.c1.x, curvePoint.c1.y, 3) + ", " + this._pt(curvePoint.c2.x, curvePoint.c2.y, 3) + ", stroke: " + fixed(this.lineWidth * 0.75, 2) + "pt)\n");
+        previous = curvePoint;
+      }
+      return;
+    }
+    if (this._quadratic) {
+      var a = this._points[0], b = this._points[this._points.length - 1], q = this._quadratic;
+      var c1 = { x: a.x + (2 / 3) * (q.x - a.x), y: a.y + (2 / 3) * (q.y - a.y) };
+      var c2 = { x: b.x + (2 / 3) * (q.x - b.x), y: b.y + (2 / 3) * (q.y - b.y) };
+      this._append("  bezier(" + this._pt(a.x, a.y, 3) + ", " + this._pt(b.x, b.y, 3) + ", " + this._pt(c1.x, c1.y, 3) + ", " + this._pt(c2.x, c2.y, 3) + ", stroke: " + fixed(this.lineWidth * 0.75, 2) + "pt)\n");
+      return;
+    }
+    this._append(
       "  line(" +
       this._pointList() +
       ", stroke: " +
-      fixed(this.lineWidth, 2) +
-      "pt)\n";
+      fixed(this.lineWidth * 0.75, 2) +
+      "pt)\n");
   };
 
   // only used for arrowheads
   this.fill = function () {
     if (this._points.length < 3) return;
-    this._data +=
+    this._append(
       "  line(" +
       this._pointList() +
-      ", close: true, fill: black, stroke: none)\n";
+      ", close: true, fill: black, stroke: none)\n");
   };
 
   this.measureText = function (text) {
@@ -195,18 +270,18 @@ function ExportAsTypst() {
     }
     x *= this._scale;
     y *= this._scale;
-    this._data +=
+    this._append(
       "  content(" +
       this._pt(x, y, 3) +
       ", text(font: " +
       JSON.stringify(styleFontName) +
       ", size: " +
-      fixed((angleOrNull == null ? styleStateFontSize : styleLinkFontSize) * 0.55, 2) +
+      fixed((angleOrNull == null ? styleStateFontSize : styleLinkFontSize) * 0.75, 2) +
       "pt, $" +
       labelToTypstMath(originalText) +
       '$), anchor: "' +
       anchor +
-      '")\n';
+      '")\n');
   };
 
   this.translate = this.save = this.restore = this.clearRect = function () {};

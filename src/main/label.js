@@ -19,6 +19,7 @@ function greekAt(text, pos) {
         t: String.fromCharCode(913 + offset),
         latex: "\\" + name + " ",
         len: name.length + 1,
+        greek: true,
       };
     }
     var lower = name.toLowerCase();
@@ -28,6 +29,7 @@ function greekAt(text, pos) {
         t: String.fromCharCode(945 + offset),
         latex: "\\" + lower + " ",
         len: lower.length + 1,
+        greek: true,
       };
     }
   }
@@ -35,26 +37,22 @@ function greekAt(text, pos) {
 }
 
 function labelAtomAt(text, pos) {
+  if (text.charAt(pos) === "\\" && text.charAt(pos + 1) === "_") return { raw: "_", t: "_", latex: "\\_", len: 2, greek: false };
   var g = greekAt(text, pos);
   if (g) return g;
   var ch = text.charAt(pos);
-  return { raw: ch, t: ch, latex: ch, len: 1 };
+  var esc = "%&#$".indexOf(ch) >= 0 ? "\\" + ch : ch;
+  return { raw: ch, t: ch, latex: esc, len: 1, greek: false };
 }
 
-// Returns [{sub: bool, raw, t, latex}]: raw = source text, t = display text
-// (Greek converted to unicode), latex = LaTeX math text.
+// Returns [{sub: bool, raw, t, atoms}]: raw = source text, t = display text
+// (Greek converted to unicode), atoms = the individual characters.
 function labelSegments(text) {
   var atoms = [];
   var i = 0;
-  var toggled = false;
   var a;
   while (i < text.length) {
     var ch = text.charAt(i);
-    if (ch === "\\" && text.charAt(i + 1) === "_") {
-      toggled = !toggled;
-      i += 2;
-      continue;
-    }
     if (ch === "_" && i + 1 < text.length) {
       var open = text.charAt(i + 1);
       if (open === "{" || open === "(") {
@@ -77,7 +75,7 @@ function labelSegments(text) {
     }
     // (a trailing lone "_" falls through and shows as a literal underscore while typing)
     a = labelAtomAt(text, i);
-    a.sub = toggled;
+    a.sub = false;
     atoms.push(a);
     i += a.len;
   }
@@ -88,9 +86,9 @@ function labelSegments(text) {
     if (last && last.sub === at.sub) {
       last.raw += at.raw;
       last.t += at.t;
-      last.latex += at.latex;
+      last.atoms.push(at);
     } else {
-      segs.push({ sub: at.sub, raw: at.raw, t: at.t, latex: at.latex });
+      segs.push({ sub: at.sub, raw: at.raw, t: at.t, atoms: [at] });
     }
   }
   return segs;
@@ -116,13 +114,46 @@ function drawRichSegments(c, segs, x, baselineY, fontSize) {
   c.font = styleFontCSS(fontSize);
 }
 
+// Words (2+ letters) come out upright like the canvas and Typst; single letters stay math italic.
+function latexOfAtoms(atoms) {
+  var out = "";
+  var run = "";
+  function flush() {
+    out += run.length > 1 ? "\\mathrm{" + run + "}" : run;
+    run = "";
+  }
+  for (var i = 0; i < atoms.length; i++) {
+    var a = atoms[i];
+    if (!a.greek && /^[A-Za-z]$/.test(a.raw)) {
+      run += a.raw;
+      continue;
+    }
+    flush();
+    out += a.raw === " " ? "\\mbox{ }" : a.latex;
+  }
+  flush();
+  return out;
+}
+
 function labelToLatexMath(text) {
   var segs = labelSegments(text);
   var out = "";
   for (var i = 0; i < segs.length; i++) {
-    var body = segs[i].latex.replace(/ /g, "\\mbox{ }");
+    var body = latexOfAtoms(segs[i].atoms);
     if (segs[i].sub) out += (out === "" ? "{}" : "") + "_{" + body + "}";
     else out += body;
   }
   return out;
+}
+
+// TikZ node options: anchor plus a font size matching the Typst export (text px * 0.55 = pt),
+// so labels no longer depend on the size of the document they are pasted into.
+function latexNodeParams(nodeParams, angleOrNull) {
+  var size = angleOrNull == null ? styleStateFontSize : styleLinkFontSize;
+  var pt = fixed(size * 0.75, 2);
+  var lead = fixed(size * 0.75 * 1.2, 2);
+  var anchor = nodeParams.replace(/[\[\]\s]/g, "");
+  return (
+    "[" + (anchor ? anchor + ", " : "") + "font=\\fontsize{" + pt + "}{" + lead + "}\\selectfont] "
+  );
 }

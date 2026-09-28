@@ -137,6 +137,10 @@ function wireUI() {
   bindExport(latexBtn, saveAsLaTeX);
   if (typeof wireStyleUI === "function") wireStyleUI();
   if (typeof wireNamesUI === "function") wireNamesUI();
+  if (typeof wireExportOptionsUI === "function") wireExportOptionsUI();
+  if (typeof wireImportUI === "function") wireImportUI();
+  if (typeof wirePagesUI === "function") wirePagesUI();
+  if (typeof addCreditLine === "function") addCreditLine();
   bindExport(document.getElementById("btn-typst"), saveAsTypst);
 
   function updateThemeButton() {

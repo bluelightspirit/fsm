@@ -44,9 +44,9 @@ Node.prototype.closestPointOnCircle = function (x, y) {
   };
 };
 
-Node.prototype.containsPoint = function (x, y) {
+Node.prototype.containsPoint = function (x, y, extraTolerance) {
+  var radius = nodeRadius + (extraTolerance || 0);
   return (
-    (x - this.x) * (x - this.x) + (y - this.y) * (y - this.y) <
-    nodeRadius * nodeRadius
+    (x - this.x) * (x - this.x) + (y - this.y) * (y - this.y) < radius * radius
   );
 };
