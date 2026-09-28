@@ -3,6 +3,8 @@ function StartLink(node, start) {
   this.deltaX = 0;
   this.deltaY = 0;
   this.text = "";
+  this.labelDx = 0;
+  this.labelDy = 0;
 
   if (start) {
     this.setAnchorPoint(start.x, start.y);
@@ -51,8 +53,8 @@ StartLink.prototype.draw = function (c) {
   drawText(
     c,
     this.text,
-    stuff.startX,
-    stuff.startY,
+    stuff.startX + this.labelDx,
+    stuff.startY + this.labelDy,
     textAngle,
     selectedObject == this,
   );

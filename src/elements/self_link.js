@@ -3,6 +3,8 @@ function SelfLink(node, mouse) {
   this.anchorAngle = 0;
   this.mouseOffsetAngle = 0;
   this.text = "";
+  this.labelDx = 0;
+  this.labelDy = 0;
 
   if (mouse) {
     this.setAnchorPoint(mouse.x, mouse.y);
@@ -68,8 +70,8 @@ SelfLink.prototype.draw = function (c) {
   drawText(
     c,
     this.text,
-    textX,
-    textY,
+    textX + this.labelDx,
+    textY + this.labelDy,
     this.anchorAngle,
     selectedObject == this,
   );

@@ -229,8 +229,27 @@ window.onload = function () {
   canvas.onmousedown = function (e) {
     var mouse = crossBrowserRelativeMousePos(e);
     flushHistory();
+    var previousSelection = selectedObject;
     selectedObject = selectObject(mouse.x, mouse.y);
     movingObject = false;
+    labelDrag = null;
+    if (e.altKey) {
+      // Alt+drag moves the label of the clicked link, or of the selected link
+      var target = selectedObject;
+      if (target == null || target instanceof Node) target = previousSelection;
+      if (target != null && !(target instanceof Node)) {
+        selectedObject = target;
+        labelDrag = {
+          startX: mouse.x,
+          startY: mouse.y,
+          dx: target.labelDx || 0,
+          dy: target.labelDy || 0,
+          moved: false,
+        };
+        draw();
+        return false;
+      }
+    }
     originalClick = mouse;
 
     if (selectedObject != null) {
@@ -263,6 +282,18 @@ window.onload = function () {
   canvas.ondblclick = function (e) {
     var mouse = crossBrowserRelativeMousePos(e);
     flushHistory();
+    if (e.altKey) {
+      // Alt+double-click on a link resets its label to the default spot
+      var hit = selectObject(mouse.x, mouse.y);
+      if (hit != null && !(hit instanceof Node) && (hit.labelDx || hit.labelDy)) {
+        selectedObject = hit;
+        hit.labelDx = 0;
+        hit.labelDy = 0;
+        draw();
+        commitHistory();
+      }
+      return;
+    }
     selectedObject = selectObject(mouse.x, mouse.y);
 
     if (selectedObject == null) {
@@ -280,6 +311,14 @@ window.onload = function () {
 
   canvas.onmousemove = function (e) {
     var mouse = crossBrowserRelativeMousePos(e);
+
+    if (labelDrag != null && selectedObject != null) {
+      selectedObject.labelDx = labelDrag.dx + (mouse.x - labelDrag.startX);
+      selectedObject.labelDy = labelDrag.dy + (mouse.y - labelDrag.startY);
+      labelDrag.moved = true;
+      draw();
+      return;
+    }
 
     if (currentLink != null) {
       var targetNode = selectObject(mouse.x, mouse.y);
@@ -318,6 +357,13 @@ window.onload = function () {
   };
 
   canvas.onmouseup = function (e) {
+    if (labelDrag != null) {
+      var moved = labelDrag.moved;
+      labelDrag = null;
+      draw();
+      if (moved) commitHistory();
+      return;
+    }
     var didChange = movingObject;
     movingObject = false;
 
@@ -337,6 +383,7 @@ window.onload = function () {
 };
 
 var shift = false;
+var labelDrag = null; // active Alt+drag of a link label
 
 function deleteSelected() {
   if (selectedObject == null) return;
@@ -570,5 +617,26 @@ function saveAsLaTeX() {
   Promise.resolve(copyToClipboard(texData)).then(function (ok) {
     if (ok) showToast("LaTeX copied to clipboard");
     else showToast("Could not copy — clipboard blocked", "error");
+  });
+}
+
+
+function saveAsTypst() {
+  var exporter = new ExportAsTypst();
+  var oldSelectedObject = selectedObject;
+  selectedObject = null;
+  drawUsing(exporter, EXPORT_COLORS);
+  selectedObject = oldSelectedObject;
+  var json = snapshotJSON();
+  if (typeof json !== "string") json = JSON.stringify(json);
+  var typData = exporter.toTypst(json);
+  var ok = downloadBlob(
+    activeFSMFileName("typ"),
+    typData,
+    "text/plain;charset=utf-8",
+  );
+  Promise.resolve(copyToClipboard(typData)).then(function (copied) {
+    if (ok) showToast(copied ? "Typst downloaded and copied" : "Typst downloaded");
+    else showToast("Could not download Typst", "error");
   });
 }
