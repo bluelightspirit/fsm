@@ -95,7 +95,9 @@ function deserializeState(data) {
       link.text = bl.text;
       link.labelDx = bl.labelDx || 0;
       link.labelDy = bl.labelDy || 0;
-      link.lineAngleAdjust = bl.lineAngleAdjust;
+      // Older/imported/generated links may omit this optional angle offset.
+      // Keep the constructor's zero default so label placement never receives NaN.
+      link.lineAngleAdjust = Number(bl.lineAngleAdjust) || 0;
     }
     if (link) links.push(link);
   }

@@ -1,0 +1,2 @@
+-r requirements-lean.txt
+-r requirements-automata.txt

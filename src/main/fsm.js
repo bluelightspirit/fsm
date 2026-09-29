@@ -111,6 +111,36 @@ function drawText(c, originalText, x, y, angleOrNull, isSelected) {
     y += cornerPointY + cos * slide;
   }
 
+  // Arrow labels must stay inside a printable page, even when their natural
+  // midpoint falls in a side, top, bottom, or inter-page margin.
+  if (angleOrNull != null && constrainToMargins && typeof pageHeightPx === "function") {
+    var halfLabelWidth = width / 2 + 3;
+    var halfLabelHeight = Math.max(fontSize / 2, lines.length * fontSize * 0.575) + 3;
+    var printableLeft = pageMargins.left * PX_PER_INCH;
+    var printableRight = pageWidthPx() - pageMargins.right * PX_PER_INCH;
+    var printableWidth = Math.max(0, printableRight - printableLeft);
+    var clampedHalfWidth = Math.min(halfLabelWidth, printableWidth / 2);
+    var bestLabel = null;
+    for (var page = 0; page < pageCount; page++) {
+      var top = page * pageHeightPx() + pageMargins.top * PX_PER_INCH;
+      var bottom = (page + 1) * pageHeightPx() - pageMargins.bottom * PX_PER_INCH;
+      var availableHeight = Math.max(0, bottom - top);
+      var clampedHalfHeight = Math.min(halfLabelHeight, availableHeight / 2);
+      var minX = printableLeft + clampedHalfWidth;
+      var maxX = printableRight - clampedHalfWidth;
+      var minY = top + clampedHalfHeight;
+      var maxY = bottom - clampedHalfHeight;
+      var candidateX = Math.max(minX, Math.min(maxX, centerX));
+      var candidateY = Math.max(minY, Math.min(maxY, y));
+      var dx = candidateX - centerX, dy = candidateY - y;
+      var distance = dx * dx + dy * dy;
+      if (!bestLabel || distance < bestLabel.distance) {
+        bestLabel = { x: candidateX, y: candidateY, distance: distance };
+      }
+    }
+    if (bestLabel) { centerX = bestLabel.x; y = bestLabel.y; }
+  }
+
   // Draw each line centered around the same anchor.
   var lastCaretX = centerX, lastCaretY = y;
   for (var line = 0; line < lines.length; line++) {

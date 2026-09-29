@@ -15,8 +15,8 @@ def _lean_source(automaton: dict[str, Any], alphabet: list[str], kind: str) -> s
     starts = automaton.get("starts", [])
     accepts = automaton.get("accepts", [])
     edges = automaton.get("edges", [])
-    if not isinstance(nodes, list) or not 1 <= len(nodes) <= 256:
-        raise ValueError("The Lean check accepts diagrams with 1–256 states.")
+    if not isinstance(nodes, list) or not 1 <= len(nodes) <= 512:
+        raise ValueError("The Lean check accepts diagrams with 1–512 states.")
     if not isinstance(starts, list) or len(starts) != 1:
         raise ValueError("The graph must have exactly one start arrow before Lean checking.")
     if not isinstance(alphabet, list) or len(alphabet) > 128:
@@ -76,7 +76,9 @@ def check_with_pypantograph(payload: dict[str, Any]) -> dict[str, Any]:
 
         # Pantograph sessions are stateful; serialize checks from threaded HTTP requests.
         with _lean_lock:
-            with Server(imports=["Init"], timeout=30) as server:
+            # Pantograph waits for its Lean REPL to emit a startup-ready line.
+            # On a cold WSL startup, 30 seconds can expire before any check runs.
+            with Server(imports=["Init"], timeout=120) as server:
                 server.check_compile(source)
         return {"ok": True, "available": True, "message": "Lean compiled and proved the generated finite-automaton invariants."}
     except Exception as exc:  # Expose actionable local setup/Lean diagnostics in the panel.

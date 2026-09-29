@@ -34,7 +34,30 @@ function wireUI() {
   }
 
   function deleteFsm(fsm) {
-    if (!confirm('Delete "' + fsm.name + '"? This cannot be undone.')) return;
+    // Avoid window.confirm here: browsers suppress repeated native dialogs after
+    // several deletions, which made the delete buttons appear to stop working.
+    var dialog = document.getElementById("delete-fsm-dialog");
+    if (!dialog) {
+      dialog = document.createElement("dialog");
+      dialog.id = "delete-fsm-dialog";
+      dialog.innerHTML =
+        '<p class="delete-fsm-message"></p>' +
+        '<div class="delete-fsm-actions"><button type="button" data-action="cancel">Cancel</button>' +
+        '<button type="button" data-action="delete">Delete FSM</button></div>';
+      document.body.appendChild(dialog);
+      dialog.querySelector('[data-action="cancel"]').onclick = function () {
+        dialog.close("cancel");
+      };
+      dialog.querySelector('[data-action="delete"]').onclick = function () {
+        dialog.close("delete");
+      };
+    }
+    dialog.querySelector(".delete-fsm-message").textContent =
+      'Delete “' + fsm.name + '”? This cannot be undone.';
+    dialog.onclose = function () {
+      if (dialog.returnValue !== "delete") return;
+      // The sidebar may have changed while the confirmation was open.
+      if (!Workspace.list().some(function (item) { return item.id === fsm.id; })) return;
     var wasActive = fsm.id === Workspace.getActiveId();
     Workspace.remove(fsm.id);
     if (wasActive) {
@@ -43,6 +66,8 @@ function wireUI() {
       draw();
     }
     updateTitle();
+    };
+    dialog.showModal();
   }
 
   function renderSidebar() {

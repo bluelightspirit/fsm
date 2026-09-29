@@ -19,6 +19,7 @@ import json
 from urllib.parse import urlparse
 
 from lean_integration import check_with_pypantograph
+from automata_integration import regex_to_automaton
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WWW = os.path.join(ROOT, "www")
@@ -62,7 +63,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if urlparse(self.path).path != "/api/lean/check":
+        endpoint = urlparse(self.path).path
+        if endpoint not in ("/api/lean/check", "/api/automata/regex"):
             self._send_json(404, {"error": "Not found"})
             return
         try:
@@ -71,8 +73,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self._send_json(413, {"error": "Request must be between 1 byte and 512 KB"})
                 return
             payload = json.loads(self.rfile.read(size).decode("utf-8"))
-            result = check_with_pypantograph(payload)
-            self._send_json(200, {"lean": result})
+            if endpoint == "/api/lean/check":
+                result = check_with_pypantograph(payload)
+                self._send_json(200, {"lean": result})
+            else:
+                result = regex_to_automaton(payload)
+                self._send_json(200, {"automaton": result})
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
             self._send_json(400, {"error": str(exc)})
         except Exception as exc:

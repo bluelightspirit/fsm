@@ -258,6 +258,26 @@
         background: var(--icon-hover-bg-on-accent);
       }
 
+      #delete-fsm-dialog {
+        width: min(360px, calc(100vw - 40px));
+        border: 1px solid var(--border-strong);
+        border-radius: 8px;
+        padding: 20px;
+        color: var(--text);
+        background: var(--surface);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+      }
+      #delete-fsm-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+      .delete-fsm-message { margin: 0 0 20px; }
+      .delete-fsm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+      .delete-fsm-actions button { padding: 7px 12px; font: inherit; }
+      .delete-fsm-actions [data-action="delete"] {
+        border: 0;
+        border-radius: 4px;
+        color: var(--accent-text);
+        background: #b42318;
+      }
+
       section.canvas-area {
         min-width: 0;
       }
@@ -287,6 +307,7 @@
       .analysis-item.ok { color: #18733b; }
       :root[data-theme="dark"] .analysis-item.ok { color: #71d095; }
       .analysis-muted { font-size: 11px; color: var(--text-muted); }
+      .analysis-grammar { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; padding: 8px; border-radius: 6px; background: var(--hover-bg); font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
       .analysis-separator { border: 0; border-top: 1px solid var(--border); margin: 12px 0; }
 
       .toolbar {
@@ -587,6 +608,7 @@
           <h3>How to use</h3>
           <div class="help-grid">
             <ul>
+              <li><b>Create a new FSM from a regex:</b> in <i>Automaton properties</i>, enter a Python-style regex under <i>Regex → automaton</i>, choose ε-NFA or DFA, then select <i>Create as new FSM</i>. See <a href="https://cs.lmu.edu/~ray/notes/regex/" target="_blank" rel="noopener">regular expression notes</a> for syntax.</li>
               <li><b>Add a state:</b> double-click on the canvas</li>
               <li><b>Add an arrow:</b> Shift-drag from one state to another, or Shift-click the source and click the destination</li>
               <li><b>Select something:</b> click it once</li>
@@ -633,12 +655,28 @@
         <div class="analysis-summary" id="automata-summary">Read the current states and arrows.</div>
         <div class="analysis-results" id="automata-results" aria-live="polite"></div>
         <hr class="analysis-separator" />
+        <h3>Regex → automaton</h3>
+        <div class="analysis-controls">
+          <label>Regular expression (Python-style)
+            <input id="automata-regex" type="text" placeholder="(a|b)*abb" autocomplete="off" />
+          </label>
+          <label>Generate
+            <select id="automata-regex-mode"><option value="nfa">ε-NFA</option><option value="dfa">DFA</option></select>
+          </label>
+          <div class="analysis-actions"><button id="automata-regex-create" type="button">Create as new FSM</button></div>
+          <div class="analysis-muted">Uses Pyformlang's Python-style regex syntax (for example, <code>|</code> for union, <code>*</code> for zero or more, <code>+</code> for one or more). Creates a separate FSM; Lean can check its structural invariants.</div>
+        </div>
+        <hr class="analysis-separator" />
         <h3>Convert</h3>
         <div class="analysis-actions"><button id="automata-convert" type="button">NFA → DFA</button></div>
         <div class="analysis-muted" id="automata-convert-note">Creates a separate FSM in the left workspace list using subset construction.</div>
         <hr class="analysis-separator" />
-        <h3>Not included yet</h3>
-        <div class="analysis-muted">Regex conversion, DFA minimization, step-by-step input simulation, and a transition-table editor are not implemented yet. Symbols are inferred from arrow labels unless you enter an alphabet above.</div>
+        <h3>Finite automaton → grammar</h3>
+        <div class="analysis-actions"><button id="automata-to-grammar" type="button">Show regular CFG</button></div>
+        <div class="analysis-muted">Creates an equivalent right-linear grammar (a regular subset of CFGs) from the current FSM.</div>
+        <pre class="analysis-grammar" id="automata-grammar" hidden></pre>
+        <hr class="analysis-separator" />
+        <div class="analysis-muted">Lean checks the current graph's state, transition, determinism, and completeness invariants through PyPantograph. Install both optional integrations with <code>python -m pip install -r requirements.txt</code>. CFG → PDA is the general direction; arbitrary CFGs cannot be converted to finite automata.</div>
       </aside>
     </main>
 
@@ -653,6 +691,10 @@
       <br />Automata validation and conversion adapted from
       <a href="https://github.com/ReyEscarlata0/automata-studio" target="_blank" rel="noopener">Automata Studio</a>
       by <a href="https://github.com/ReyEscarlata0" target="_blank" rel="noopener">Cesar Raul Paz Leva</a>
+      <br />Formal-language tools: <a href="https://github.com/stanford-centaur/PyPantograph" target="_blank" rel="noopener">PyPantograph</a>
+      by <a href="https://github.com/stanford-centaur" target="_blank" rel="noopener">Stanford Centaur</a>
+      · <a href="https://github.com/Aunsiels/pyformlang" target="_blank" rel="noopener">Pyformlang</a>
+      by <a href="https://github.com/Aunsiels" target="_blank" rel="noopener">Aunsiels</a>
       <br />Source code: <a href="https://github.com/bluelightspirit/fsm/tree/my-main" target="_blank" rel="noopener">github.com/bluelightspirit/fsm/tree/my-main</a>
     </footer>
 

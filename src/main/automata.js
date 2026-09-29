@@ -230,9 +230,214 @@ function automataConvertNfaToDfa() {
   refreshAutomataPanel(true);
 }
 
+function automataCreateWorkspace(name, generated, alphabet) {
+  var width = pageWidthPx(), height = pageHeightPx();
+  var count = generated.nodes.length;
+  var columns = 4, rows = Math.max(5, Math.min(7, Math.ceil(count / (4 * MAX_PAGES))));
+  var perPage = columns * rows;
+  var generatedPages = Math.max(1, Math.ceil(count / perPage));
+  var radius = nodeRadius;
+
+  // Preserve Pyformlang's construction order. Its state IDs are qN, and
+  // numeric ordering keeps the Thompson-NFA chains and branches local.
+  var stateOrder = generated.nodes.map(function (_, i) { return i; });
+  stateOrder.sort(function (a, b) {
+    var an = String(generated.nodes[a].name || "q" + a), bn = String(generated.nodes[b].name || "q" + b);
+    var am = /^(\D*)(\d+)$/.exec(an), bm = /^(\D*)(\d+)$/.exec(bn);
+    if (am && bm && am[1] === bm[1]) return Number(am[2]) - Number(bm[2]);
+    return an.localeCompare(bn) || a - b;
+  });
+
+  var marginLeft = pageMargins.left * PX_PER_INCH;
+  var marginRight = pageMargins.right * PX_PER_INCH;
+  var marginTop = pageMargins.top * PX_PER_INCH;
+  var marginBottom = pageMargins.bottom * PX_PER_INCH;
+  var safeX = Math.max(radius + 20, styleStateFontSize * 3.2);
+  var safeY = radius + 20;
+  var minX = marginLeft + safeX, maxX = width - marginRight - safeX;
+  var minY = marginTop + safeY, maxY = height - marginBottom - safeY;
+  if (maxX < minX) minX = maxX = width / 2;
+  if (maxY < minY) minY = maxY = height / 2;
+  var orderRank = new Array(count);
+  stateOrder.forEach(function (state, rank) { orderRank[state] = rank; });
+  function displayGeneratedStateName(name, index) {
+    var value = String(name || ("q" + index));
+    var match = /^q(\d+)$/i.exec(value);
+    return match ? value.charAt(0) + "_{" + match[1] + "}" : value;
+  }
+  var generatedNodes = generated.nodes.map(function (node, i) {
+    var orderIndex = orderRank[i];
+    var page = Math.floor(orderIndex / perPage);
+    var cell = orderIndex % perPage;
+    var row = Math.floor(cell / columns);
+    var col = cell % columns;
+    if (row % 2) col = columns - 1 - col;
+    var x = minX + (columns === 1 ? 0 : (maxX - minX) * col / (columns - 1));
+    var y = page * height + minY + (rows === 1 ? 0 : (maxY - minY) * row / (rows - 1));
+    return { text: displayGeneratedStateName(node.name, i), isAcceptState: !!node.accepting,
+      x: x, y: y };
+  });
+  var generatedLinks = [];
+  (generated.starts || []).forEach(function (i) { generatedLinks.push({ type: "StartLink", node: i, text: "", deltaX: 0, deltaY: -Math.max(50, nodeRadius * 2) }); });
+  var grouped = new Map();
+  (generated.edges || []).forEach(function (edge) {
+    var key = edge.from + ":" + edge.to;
+    if (!grouped.has(key)) grouped.set(key, { from: edge.from, to: edge.to, symbols: [] });
+    var symbols = automataSplitLabel(edge.symbol);
+    symbols.forEach(function (symbol) { if (grouped.get(key).symbols.indexOf(symbol) < 0) grouped.get(key).symbols.push(symbol); });
+  });
+  // Builds the same tent-shaped curvePoints link.js's _ensureCurvePoints()
+  // would derive from a single perpendicularPart, so scoring and rendering
+  // always agree on shape.
+  function tentCurvePoints(base) {
+    return [0.25, 0.5, 0.75].map(function (t) {
+      return { t: t, perpendicular: base * (1 - Math.abs(2 * t - 1)) };
+    });
+  }
+  // Mirrors link.js's Link.prototype.getEndPointsAndCircle bezier-segment math
+  // exactly, so "does this clear the obstacle" is asked about the real curve.
+  function bezierSegmentsFromRoute(route) {
+    var segments = [];
+    for (var si = 0; si < route.length - 1; si++) {
+      var previous = route[Math.max(0, si - 1)], current = route[si];
+      var next = route[si + 1], following = route[Math.min(route.length - 1, si + 2)];
+      segments.push({
+        startX: current.x, startY: current.y, endX: next.x, endY: next.y,
+        control1X: current.x + (next.x - previous.x) / 6,
+        control1Y: current.y + (next.y - previous.y) / 6,
+        control2X: next.x - (following.x - current.x) / 6,
+        control2Y: next.y - (following.y - current.y) / 6,
+      });
+    }
+    return segments;
+  }
+  function sampleSegments(segments, perSeg) {
+    var pts = [];
+    segments.forEach(function (seg) {
+      for (var i = 0; i <= perSeg; i++) {
+        var t = i / perSeg, u = 1 - t;
+        pts.push({
+          x: u * u * u * seg.startX + 3 * u * u * t * seg.control1X + 3 * u * t * t * seg.control2X + t * t * t * seg.endX,
+          y: u * u * u * seg.startY + 3 * u * u * t * seg.control1Y + 3 * u * t * t * seg.control2Y + t * t * t * seg.endY,
+        });
+      }
+    });
+    return pts;
+  }
+  function handlesFromCurvePoints(a, b, curvePoints) {
+    var dx = b.x - a.x, dy = b.y - a.y, length = Math.sqrt(dx * dx + dy * dy) || 1;
+    return curvePoints.map(function (p) {
+      return { x: a.x + dx * p.t - (dy / length) * p.perpendicular, y: a.y + dy * p.t + (dx / length) * p.perpendicular };
+    });
+  }
+  // Worst-case clearance (negative means it collides) of the curve actually
+  // rendered by this set of curvePoints, sampled densely against obstacles.
+  function realClearance(a, b, curvePoints, obstacles, radius, clearanceMargin) {
+    var route = [a].concat(handlesFromCurvePoints(a, b, curvePoints), [b]);
+    var segments = bezierSegmentsFromRoute(route);
+    var pts = sampleSegments(segments, 20);
+    var worst = Infinity;
+    pts.forEach(function (p) {
+      obstacles.forEach(function (node) {
+        var d = Math.sqrt((p.x - node.x) * (p.x - node.x) + (p.y - node.y) * (p.y - node.y)) - radius - clearanceMargin;
+        if (d < worst) worst = d;
+      });
+    });
+    return worst;
+  }
+  function curveOffsetFor(source, target, linkIndex) {
+    var a = generatedNodes[source], b = generatedNodes[target];
+    var dx = b.x - a.x, dy = b.y - a.y;
+    var length = Math.sqrt(dx * dx + dy * dy) || 1;
+    var clearanceMargin = 8;
+    var base = Math.max(20, radius * 0.8);
+    var relevant = [];
+    generatedNodes.forEach(function (node, i) {
+      if (i === source || i === target) return;
+      var ox = node.x - a.x, oy = node.y - a.y;
+      var along = (ox * dx + oy * dy) / (length * length);
+      if (along > -0.15 && along < 1.15) relevant.push(node);
+    });
+    if (!relevant.length) return 0;
+    var preferredSign = (source < target ? 1 : -1) * (linkIndex % 2 ? -1 : 1);
+    var signs = [preferredSign, -preferredSign];
+    var maxBendCap = Math.min(width, height) * 0.4;
+    for (var si = 0; si < signs.length; si++) {
+      var sign = signs[si];
+      for (var magnitude = base; magnitude <= maxBendCap; magnitude *= 1.25) {
+        var candidate = tentCurvePoints(sign * magnitude);
+        if (realClearance(a, b, candidate, relevant, radius, clearanceMargin) >= 0) return sign * magnitude;
+      }
+    }
+    // Tight cluster where nothing fully clears: least-bad fallback rather than
+    // an unbounded loop, so a pathological layout still produces something.
+    return preferredSign * maxBendCap;
+  }
+  var curveIndex = 0;
+  grouped.forEach(function (edge) {
+    var label = edge.symbols.join(",");
+    if (edge.from === edge.to) generatedLinks.push({ type: "SelfLink", node: edge.from, text: label, anchorAngle: -Math.PI / 2 });
+    else generatedLinks.push({ type: "Link", nodeA: edge.from, nodeB: edge.to, text: label, parallelPart: 0.5,
+      perpendicularPart: curveOffsetFor(edge.from, edge.to, curveIndex++), curvePoints: null });
+  });
+  flushHistory(); saveBackup();
+  var newId = Workspace.create(name);
+  Workspace.switchTo(newId);
+  var data = { nodes: generatedNodes, links: generatedLinks, style: getStyle(), pages: generatedPages,
+    pageSize: pageSizeKey, margins: pageMarginsForExport(), constrainToMargins: constrainToMargins };
+  Workspace.saveActive(data); deserializeState(data);
+  History.reset(snapshotJSON()); draw();
+  try {
+    localStorage.setItem("fsm-automata-type-" + newId, generated.type || "nfa");
+    localStorage.setItem("fsm-automata-alphabet-" + newId, (alphabet || []).join(", "));
+  } catch (e) {}
+  automataStatusMessage = "Created " + name + " with " + generatedNodes.length + " states in the workspace.";
+  refreshAutomataPanel(true);
+}
+
+function automataGenerateRegex() {
+  var input = document.getElementById("automata-regex");
+  var mode = document.getElementById("automata-regex-mode").value;
+  var button = document.getElementById("automata-regex-create");
+  var expression = input.value.trim();
+  if (!expression) { automataStatusMessage = "Enter a regular expression first."; refreshAutomataPanel(true); return; }
+  button.disabled = true;
+  automataStatusMessage = "Generating an automaton with Pyformlang…"; refreshAutomataPanel(true);
+  fetch("/api/automata/regex", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ regex: expression, mode: mode }) })
+    .then(function (response) { return response.json().then(function (body) { if (!response.ok) throw new Error(body.error || "Regex conversion failed"); return body.automaton; }); })
+    .then(function (generated) { automataCreateWorkspace("From regex: " + expression, generated, generated.alphabet); })
+    .catch(function (error) { automataStatusMessage = error.message; refreshAutomataPanel(true); })
+    .finally(function () { button.disabled = false; });
+}
+
+function automataShowRegularGrammar() {
+  var model = automataBuildModel(), output = document.getElementById("automata-grammar");
+  if (model.nodes.length === 0 || model.starts.length !== 1) {
+    automataStatusMessage = "A regular grammar needs at least one state and exactly one start arrow.";
+    refreshAutomataPanel(true); return;
+  }
+  var alternatives = model.nodes.map(function () { return []; });
+  var hasUnlabeled = model.edges.some(function (edge) { return !edge.symbol; });
+  if (hasUnlabeled) {
+    automataStatusMessage = "Add an input symbol to every arrow before converting this FSM to a grammar.";
+    refreshAutomataPanel(true); return;
+  }
+  model.edges.forEach(function (edge) {
+    if (!edge.symbol || edge.from == null || edge.to == null || !alternatives[edge.from] || !alternatives[edge.to]) return;
+    if (automataEpsilon(edge.symbol)) alternatives[edge.from].push("Q" + edge.to);
+    else alternatives[edge.from].push(edge.symbol + " Q" + edge.to);
+  });
+  model.accepts.forEach(function (state) { alternatives[state].push("ε"); });
+  output.textContent = alternatives.map(function (rules, i) { return "Q" + i + " → " + (rules.length ? rules.join(" | ") : "∅"); }).join("\n");
+  output.hidden = false;
+  automataStatusMessage = "Displayed an equivalent right-linear grammar; each Q-state corresponds to a state in this FSM.";
+  refreshAutomataPanel(true);
+}
+
 function wireAutomataUI() {
   var mode = document.getElementById("automata-type"), alpha = document.getElementById("automata-alphabet");
   var validate = document.getElementById("automata-validate"), lean = document.getElementById("automata-lean"), convert = document.getElementById("automata-convert");
+  var regexButton = document.getElementById("automata-regex-create"), grammarButton = document.getElementById("automata-to-grammar");
   if (!mode || mode.dataset.wired) return;
   mode.dataset.wired = "1";
   function saveSettings() {
@@ -258,5 +463,7 @@ function wireAutomataUI() {
     try { automataConvertNfaToDfa(); }
     catch (error) { automataStatusMessage = error.message; refreshAutomataPanel(true); }
   });
+  regexButton.addEventListener("click", automataGenerateRegex);
+  grammarButton.addEventListener("click", automataShowRegularGrammar);
   refreshAutomataPanel(true);
 }

@@ -25,6 +25,15 @@ StartLink.prototype.setAnchorPoint = function (x, y) {
 };
 
 StartLink.prototype.getEndPoints = function () {
+  // Imported/generated start arrows may omit their anchor offset. A zero
+  // vector also makes closestPointOnCircle divide by zero, so give those
+  // arrows a visible default entry from above the state.
+  if (!isFinite(this.deltaX)) this.deltaX = 0;
+  if (!isFinite(this.deltaY)) this.deltaY = 0;
+  if (Math.sqrt(this.deltaX * this.deltaX + this.deltaY * this.deltaY) < 1e-6) {
+    this.deltaX = 0;
+    this.deltaY = -Math.max(50, nodeRadius * 2);
+  }
   var startX = this.node.x + this.deltaX;
   var startY = this.node.y + this.deltaY;
   var end = this.node.closestPointOnCircle(startX, startY);
