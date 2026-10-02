@@ -1,5 +1,19 @@
 .venv
 .venv311
 .venv-py311
-__pycache__
 .git
+# Python generated files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Windows downloaded-file metadata
+*:Zone.Identifier
+
+# Python generated files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Windows Zone.Identifier metadata
+*:Zone.Identifier
