@@ -1,4 +1,31 @@
-"""Regex -> automaton conversion for the browser-based FSM editor.
+#!/usr/bin/env python3
+"""Replaces automata_integration.py's regex_to_automaton() to support TWO
+regex dialects, selected by a new "syntax" field in the request payload:
+
+  - "theory"  (default): formal_regex.py, matching pyformlang.Regex syntax.
+               This is the primary, non-experimental option.
+  - "python":  glushkov_regex.py, Python-`re`-flavored sugar. Marked
+               experimental in both the error-message text and the returned
+               payload (an "experimental": true flag), since it's newer and
+               has a narrower supported subset than full Python `re`.
+
+Both dialects funnel into the same shared, already-verified Glushkov
+construction core (glushkov_core.py), so there is one proven construction
+and determinization path underneath two different front-end parsers.
+
+Run from the repo root, with glushkov_core.py, glushkov_regex.py, and
+formal_regex.py already copied into the repo root alongside this script.
+Aborts without writing anything if automata_integration.py doesn't define
+regex_to_automaton (wrong file / already replaced)."""
+
+import os
+
+REQUIRED_MODULES = ["glushkov_core.py", "glushkov_regex.py", "formal_regex.py"]
+missing = [m for m in REQUIRED_MODULES if not os.path.exists(m)]
+if missing:
+    raise SystemExit(f"ABORTED: copy these into the repo root first: {', '.join(missing)}")
+
+NEW_CONTENT = '''"""Regex -> automaton conversion for the browser-based FSM editor.
 
 Supports two regex dialects (see "syntax" in the request payload):
   - "theory"  (default): formal_regex.py - the formal/textbook dialect,
@@ -7,7 +34,7 @@ Supports two regex dialects (see "syntax" in the request payload):
               "epsilon"/'$' for the empty string, multi-character symbols
               unless separated). This is the primary, supported option.
   - "python": glushkov_regex.py - EXPERIMENTAL Python-`re`-flavored sugar
-              (\\d \\w \\s, [...], ?, literal adjacency = concatenation).
+              (\\\\d \\\\w \\\\s, [...], ?, literal adjacency = concatenation).
               Narrower than full Python `re` (no anchors, no {m,n}, no
               backreferences/lookaround yet).
 
@@ -69,7 +96,7 @@ def regex_to_automaton(payload: dict[str, Any]) -> dict[str, Any]:
     if len(expression) > MAX_REGEX_LENGTH:
         raise ValueError(f"Regular expressions are limited to {MAX_REGEX_LENGTH} characters.")
     if mode not in ("nfa", "dfa"):
-        raise ValueError("Choose either \u03b5-NFA or DFA output.")
+        raise ValueError("Choose either \\u03b5-NFA or DFA output.")
     if syntax not in ("theory", "python"):
         raise ValueError("Choose either the formal (theory) or Python-style (experimental) regex syntax.")
 
@@ -107,3 +134,17 @@ def regex_to_automaton(payload: dict[str, Any]) -> dict[str, Any]:
         "edges": edges,
         "alphabet": automaton["alphabet"],
     }
+'''
+
+path = "automata_integration.py"
+with open(path, encoding="utf-8") as f:
+    src = f.read()
+
+if "def regex_to_automaton" not in src:
+    raise SystemExit("ABORTED, nothing written: automata_integration.py doesn't define regex_to_automaton().")
+
+with open(path, "w", encoding="utf-8") as f:
+    f.write(NEW_CONTENT)
+print("replaced automata_integration.py: regex_to_automaton() now supports syntax='theory'|'python'.")
+print("The JSON response gained two new fields: \"syntax\" and \"experimental\" (true for python-style).")
+print("restart the Python server (from your venv) to pick this up.")

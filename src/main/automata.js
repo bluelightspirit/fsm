@@ -395,17 +395,45 @@ function automataCreateWorkspace(name, generated, alphabet) {
   refreshAutomataPanel(true);
 }
 
+// Inserts the regex-syntax selector next to the existing mode dropdown the
+// first time it's needed, since index.html doesn't define one. Mirrors how
+// the style/names/import panels were built: created in JS, nothing to add
+// to index.html by hand.
+function ensureRegexSyntaxSelect() {
+  var existing = document.getElementById("automata-regex-syntax");
+  if (existing) return existing;
+  var modeSelect = document.getElementById("automata-regex-mode");
+  if (!modeSelect) return null;
+  var select = document.createElement("select");
+  select.id = "automata-regex-syntax";
+  select.title = "Formal (theory): pyformlang.Regex-compatible syntax (|, +, *, 'epsilon'; multi-character symbols unless separated). Python-style: experimental Python-re-flavored sugar (\\d, [...], ?).";
+  [["theory", "Formal (theory) regex"], ["python", "Python-style regex (experimental)"]].forEach(function (pair) {
+    var opt = document.createElement("option");
+    opt.value = pair[0]; opt.textContent = pair[1];
+    select.appendChild(opt);
+  });
+  select.style.marginLeft = "6px";
+  modeSelect.insertAdjacentElement("afterend", select);
+  return select;
+}
+
 function automataGenerateRegex() {
   var input = document.getElementById("automata-regex");
   var mode = document.getElementById("automata-regex-mode").value;
+  var syntaxSelect = ensureRegexSyntaxSelect();
+  var syntax = syntaxSelect ? syntaxSelect.value : "theory";
   var button = document.getElementById("automata-regex-create");
   var expression = input.value.trim();
   if (!expression) { automataStatusMessage = "Enter a regular expression first."; refreshAutomataPanel(true); return; }
   button.disabled = true;
-  automataStatusMessage = "Generating an automaton with Pyformlang…"; refreshAutomataPanel(true);
-  fetch("/api/automata/regex", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ regex: expression, mode: mode }) })
+  var engineLabel = syntax === "python" ? "the experimental Python-style engine" : "the formal-theory engine";
+  automataStatusMessage = "Generating an automaton with " + engineLabel + "…"; refreshAutomataPanel(true);
+  fetch("/api/automata/regex", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ regex: expression, mode: mode, syntax: syntax }) })
     .then(function (response) { return response.json().then(function (body) { if (!response.ok) throw new Error(body.error || "Regex conversion failed"); return body.automaton; }); })
-    .then(function (generated) { automataCreateWorkspace("From regex: " + expression, generated, generated.alphabet); })
+    .then(function (generated) {
+      var tag = generated.experimental ? " [experimental Python-style]" : " [formal]";
+      automataCreateWorkspace("From regex: " + expression + tag, generated, generated.alphabet);
+    })
     .catch(function (error) { automataStatusMessage = error.message; refreshAutomataPanel(true); })
     .finally(function () { button.disabled = false; });
 }
@@ -463,6 +491,7 @@ function wireAutomataUI() {
     try { automataConvertNfaToDfa(); }
     catch (error) { automataStatusMessage = error.message; refreshAutomataPanel(true); }
   });
+  ensureRegexSyntaxSelect();
   regexButton.addEventListener("click", automataGenerateRegex);
   grammarButton.addEventListener("click", automataShowRegularGrammar);
   refreshAutomataPanel(true);

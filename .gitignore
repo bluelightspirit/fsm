@@ -1,1 +1,5 @@
-/www/fsm.js
+.venv
+.venv311
+.venv-py311
+__pycache__
+.git
