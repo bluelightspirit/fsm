@@ -1,12 +1,28 @@
-"""Regex -> automaton conversion for the browser-based FSM editor.
+#!/usr/bin/env python3
+"""Replaces the formal/theory path with real pyformlang.regular_expression.Regex
+(the same working pattern the original pre-Glushkov code used, just swapping
+PythonRegex for Regex - no character classes exist in the formal dialect, so
+the \\d-expansion bloat that justified moving Python-style off Pyformlang
+does not apply here). The Python-style path keeps using the Glushkov engine
+(glushkov_regex.py), unchanged - that decision is evidence-backed and not
+being reverted.
+
+Requires pyformlang to be installed (it already is, in the project's
+.venv-py311 - this is the same dependency "Show regular CFG" / Lean checking
+already use).
+
+Run from the repo root. Aborts without writing anything if automata_integration.py
+doesn't define regex_to_automaton."""
+
+NEW_CONTENT = '''"""Regex -> automaton conversion for the browser-based FSM editor.
 
 Supports two regex dialects (see "syntax" in the request payload):
   - "python"  (default): glushkov_regex.py - a clean-room Glushkov (position)
               automaton construction. Built specifically because Pyformlang's
-              PythonRegex expands a character class like \\d into ten
+              PythonRegex expands a character class like \\\\d into ten
               separate literal-digit Thompson-construction branches, which
               made diagrams unusably large for common patterns (observed:
-              ~80-160 states for \\d+(\\.\\d\\d)? ). Verified against
+              ~80-160 states for \\\\d+(\\\\.\\\\d\\\\d)? ). Verified against
               Python's own `re` module across millions of test strings.
   - "theory": EXPERIMENTAL, pending a Lean-backed replacement. Calls real
               pyformlang.regular_expression.Regex directly - the formal/
@@ -16,7 +32,7 @@ Supports two regex dialects (see "syntax" in the request payload):
               separator is ONE symbol, not three - this is Pyformlang's own
               documented behavior, not an artifact of any reimplementation).
               This dialect has no character classes, so it isn't subject to
-              the \\d-expansion problem above; using the real library here
+              the \\\\d-expansion problem above; using the real library here
               removes any risk of subtle divergence from a hand-written
               parser, which matters for something explicitly labeled
               "formal" even though it's marked experimental.
@@ -33,7 +49,7 @@ MAX_REGEX_LENGTH = 512
 MAX_STATES = 512
 MAX_TRANSITIONS = 2048
 
-_EPSILON_NAMES = {"epsilon", "\u03b5", "\u03f5", "\u03bb", "\u0454"}
+_EPSILON_NAMES = {"epsilon", "\\u03b5", "\\u03f5", "\\u03bb", "\\u0454"}
 
 
 def _complete_dfa(dfa: dict[str, Any]) -> dict[str, Any]:
@@ -94,7 +110,7 @@ def _build_theory_nfa(expression: str) -> dict[str, Any]:
         for symbol, destinations in by_symbol.items():
             label = str(symbol)
             if label.lower() in _EPSILON_NAMES:
-                label = "\u03b5"
+                label = "\\u03b5"
             else:
                 alphabet.add(label)
             # Pyformlang's ε-NFA transition dict holds a SET of destinations
@@ -117,7 +133,7 @@ def _determinize_theory(nfa: dict[str, Any]) -> dict[str, Any]:
     move = {}
     eps_targets: dict[int, set[int]] = {}
     for e in nfa["edges"]:
-        if e["symbol"] == "\u03b5":
+        if e["symbol"] == "\\u03b5":
             eps_targets.setdefault(e["from"], set()).add(e["to"])
         else:
             move.setdefault((e["from"], e["symbol"]), set()).add(e["to"])
@@ -176,7 +192,7 @@ def regex_to_automaton(payload: dict[str, Any]) -> dict[str, Any]:
     if len(expression) > MAX_REGEX_LENGTH:
         raise ValueError(f"Regular expressions are limited to {MAX_REGEX_LENGTH} characters.")
     if mode not in ("nfa", "dfa"):
-        raise ValueError("Choose either \u03b5-NFA or DFA output.")
+        raise ValueError("Choose either \\u03b5-NFA or DFA output.")
     if syntax not in ("theory", "python"):
         raise ValueError("Choose either the Python-style or formal (theory, experimental) regex syntax.")
 
@@ -217,3 +233,18 @@ def regex_to_automaton(payload: dict[str, Any]) -> dict[str, Any]:
         "edges": edges,
         "alphabet": automaton["alphabet"],
     }
+'''
+
+path = "automata_integration.py"
+with open(path, encoding="utf-8") as f:
+    src = f.read()
+
+if "def regex_to_automaton" not in src:
+    raise SystemExit("ABORTED, nothing written: automata_integration.py doesn't define regex_to_automaton().")
+
+with open(path, "w", encoding="utf-8") as f:
+    f.write(NEW_CONTENT)
+print("replaced automata_integration.py: 'theory' syntax now calls real pyformlang.Regex directly.")
+print("'python' syntax is unchanged (still the Glushkov engine) and is now the non-experimental default.")
+print("formal_regex.py and the old formal-mode-specific code are no longer used by this file.")
+print("restart the Python server (from your venv, which already has pyformlang) to pick this up.")

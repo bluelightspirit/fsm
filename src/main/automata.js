@@ -407,7 +407,7 @@ function ensureRegexSyntaxSelect() {
   var select = document.createElement("select");
   select.id = "automata-regex-syntax";
   select.title = "Formal (theory): pyformlang.Regex-compatible syntax (|, +, *, 'epsilon'; multi-character symbols unless separated). Python-style: experimental Python-re-flavored sugar (\\d, [...], ?).";
-  [["theory", "Formal (theory) regex"], ["python", "Python-style regex (experimental)"]].forEach(function (pair) {
+  [["python", "Python-style regex"], ["theory", "Formal (theory) regex (experimental)"]].forEach(function (pair) {
     var opt = document.createElement("option");
     opt.value = pair[0]; opt.textContent = pair[1];
     select.appendChild(opt);
@@ -426,12 +426,12 @@ function automataGenerateRegex() {
   var expression = input.value.trim();
   if (!expression) { automataStatusMessage = "Enter a regular expression first."; refreshAutomataPanel(true); return; }
   button.disabled = true;
-  var engineLabel = syntax === "python" ? "the experimental Python-style engine" : "the formal-theory engine";
+  var engineLabel = syntax === "theory" ? "the experimental formal-theory engine" : "the Python-style engine";
   automataStatusMessage = "Generating an automaton with " + engineLabel + "…"; refreshAutomataPanel(true);
   fetch("/api/automata/regex", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ regex: expression, mode: mode, syntax: syntax }) })
     .then(function (response) { return response.json().then(function (body) { if (!response.ok) throw new Error(body.error || "Regex conversion failed"); return body.automaton; }); })
     .then(function (generated) {
-      var tag = generated.experimental ? " [experimental Python-style]" : " [formal]";
+      var tag = generated.experimental ? " [experimental formal-theory]" : " [python-style]";
       automataCreateWorkspace("From regex: " + expression + tag, generated, generated.alphabet);
     })
     .catch(function (error) { automataStatusMessage = error.message; refreshAutomataPanel(true); })
