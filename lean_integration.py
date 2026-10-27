@@ -56,11 +56,26 @@ def _lean_source(automaton: dict[str, Any], alphabet: list[str], kind: str) -> s
     source += "def transitions : List (Nat × Nat × Nat) := [" + ", ".join(rows) + "]\n"
     source += "theorem start_is_state : startState ∈ states := by decide\n"
     source += "theorem accepting_states_are_states : ∀ (s : Nat), s ∈ accepting → s ∈ states := by decide\n"
-    source += "theorem transition_endpoints_are_states : ∀ (s a t : Nat), (s, a, t) ∈ transitions → s ∈ states ∧ t ∈ states := by decide\n"
+    source += "set_option maxRecDepth 100000 in\ntheorem transition_endpoints_are_states : ∀ t ∈ transitions, t.1 ∈ states ∧ t.2.2 ∈ states := by decide\n"
     if kind == "dfa":
-        source += "theorem deterministic : ∀ (s a t₁ t₂ : Nat), (s, a, t₁) ∈ transitions → (s, a, t₂) ∈ transitions → t₁ = t₂ := by decide\n"
-        source += "theorem complete : ∀ (s : Nat), s ∈ states → ∀ (a : Nat), a ∈ alphabet → ∃ (t : Nat), (s, a, t) ∈ transitions := by decide\n"
+        source += "set_option maxRecDepth 100000 in\ntheorem deterministic : ∀ t₁ ∈ transitions, ∀ t₂ ∈ transitions, t₁.1 = t₂.1 → t₁.2.1 = t₂.2.1 → t₁.2.2 = t₂.2.2 := by decide\n"
+        source += "set_option maxRecDepth 100000 in\ntheorem complete : ∀ s ∈ states, ∀ a ∈ alphabet, ∃ t ∈ transitions, t.1 = s ∧ t.2.1 = a := by decide\n"
     return source
+
+
+def _compile_errors(units: Any) -> list[str]:
+    """check_compile reports failures as error messages inside the returned
+    units rather than by raising, so success means no error message came back."""
+    errors: list[str] = []
+    try:
+        for unit in units or []:
+            for message in getattr(unit, "messages", None) or []:
+                text = str(message)
+                if "error" in text.lower():
+                    errors.append(text)
+    except TypeError:
+        pass
+    return errors
 
 
 def check_with_pypantograph(payload: dict[str, Any]) -> dict[str, Any]:
@@ -79,7 +94,14 @@ def check_with_pypantograph(payload: dict[str, Any]) -> dict[str, Any]:
             # Pantograph waits for its Lean REPL to emit a startup-ready line.
             # On a cold WSL startup, 30 seconds can expire before any check runs.
             with Server(imports=["Init"], timeout=120) as server:
-                server.check_compile(source)
+                units = server.check_compile(source)
+        errors = _compile_errors(units)
+        if errors:
+            return {
+                "ok": False,
+                "available": True,
+                "message": ("Lean rejected the generated source: " + " | ".join(errors))[:1000],
+            }
         return {"ok": True, "available": True, "message": "Lean compiled and proved the generated finite-automaton invariants."}
     except Exception as exc:  # Expose actionable local setup/Lean diagnostics in the panel.
         message = str(exc).strip() or exc.__class__.__name__

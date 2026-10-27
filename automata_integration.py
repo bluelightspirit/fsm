@@ -28,17 +28,17 @@ from typing import Any
 
 import glushkov_regex
 from glushkov_core import determinize
+from classic_regex import parse_classic_regex, ClassicRegexSyntaxError
+from thompson_port import compile_regex
 
 MAX_REGEX_LENGTH = 512
 MAX_STATES = 512
 MAX_TRANSITIONS = 2048
 
-_EPSILON_NAMES = {"epsilon", "\u03b5", "\u03f5", "\u03bb", "\u0454"}
-
 
 def _complete_dfa(dfa: dict[str, Any]) -> dict[str, Any]:
     """Route every missing (state, symbol) pair to a shared non-accepting
-    sink state. Neither determinize() nor Pyformlang's to_deterministic()
+    sink state. Neither determinize() nor the Thompson construction
     guarantee a total transition function, but the editor's DFA validator
     (and the Lean invariant) require one."""
     alphabet = dfa["alphabet"]
@@ -63,57 +63,47 @@ def _complete_dfa(dfa: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_theory_nfa(expression: str) -> dict[str, Any]:
-    """Builds the {"states","starts","accepts","edges","alphabet"} dict from
-    real pyformlang.regular_expression.Regex, matching the same working
-    pattern the original pre-Glushkov implementation used (PythonRegex, with
-    the class swapped for Regex - everything else about how to walk a
-    Pyformlang EpsilonNFA stays the same, proven, pattern)."""
+    """Builds the {"states","starts","accepts","edges","alphabet"} dict using
+    classic_regex.py (single-character symbols, matching the Lean spec
+    exactly - no merged multi-character tokens) and thompson_port.py (a
+    direct Python port of RegexNFA.lean's `compile`, confirmed byte-for-byte
+    identical to real `lean RegexNFA.lean` output, and confirmed via a
+    by-decide equality theorem through PyPantograph to match Lean's own
+    compileRegex for at least one pattern so far)."""
     try:
-        from pyformlang.regular_expression import Regex
-    except ImportError as exc:
-        raise ValueError(
-            "pyformlang is not installed. Run: python -m pip install -r requirements.txt"
-        ) from exc
+        ast = parse_classic_regex(expression)
+    except ClassicRegexSyntaxError as exc:
+        raise ValueError(f"Could not parse that formal-theory regex: {exc}") from exc
 
-    try:
-        automaton = Regex(expression).to_epsilon_nfa()
-    except Exception as exc:
-        raise ValueError(f"Could not parse that formal-theory regex: {str(exc)[:400]}") from exc
-
-    states = sorted(automaton.states, key=str)
-    if not states:
-        raise ValueError("The conversion produced no states.")
-    state_ids = {state: index for index, state in enumerate(states)}
-    starts = sorted(state_ids[s] for s in automaton.start_states if s in state_ids)
-    accepts = sorted(state_ids[s] for s in automaton.final_states if s in state_ids)
-
+    result = compile_regex(ast)
     edges = []
     alphabet = set()
-    transition_dict = automaton.to_dict()
-    for source, by_symbol in transition_dict.items():
-        for symbol, destinations in by_symbol.items():
-            label = str(symbol)
-            if label.lower() in _EPSILON_NAMES:
-                label = "\u03b5"
-            else:
-                alphabet.add(label)
-            # Pyformlang's ε-NFA transition dict holds a SET of destinations
-            # per (state, symbol) pair.
-            for destination in destinations:
-                edges.append({"from": state_ids[source], "to": state_ids[destination], "symbol": label})
+    for t in result["transitions"]:
+        if t[0] == "symbol":
+            _, source, c, destination = t
+            edges.append({"from": source, "to": destination, "symbol": c})
+            alphabet.add(c)
+        else:
+            _, source, destination = t
+            edges.append({"from": source, "to": destination, "symbol": "\u03b5"})
 
     return {
-        "states": len(states),
-        "starts": starts,
-        "accepts": accepts,
+        "states": result["next_state"],
+        "starts": [result["start"]],
+        "accepts": [result["accept"]],
         "edges": edges,
         "alphabet": sorted(alphabet),
     }
 
 
 def _determinize_theory(nfa: dict[str, Any]) -> dict[str, Any]:
-    """Subset construction WITH epsilon-closure, since (unlike the Glushkov
-    path) a real pyformlang ε-NFA can contain epsilon transitions."""
+    """Subset construction with epsilon-closure, made CANONICALLY
+    deterministic: every step that produces an order (worklist processing,
+    epsilon-closure expansion) is explicitly sorted, rather than relying on
+    Python's set iteration order. This makes exact DFA state numbering a
+    specified property of the algorithm - required for the Lean port of
+    this function to be a meaningful by-decide equality proof rather than
+    an accident of a particular Python implementation's set hashing."""
     move = {}
     eps_targets: dict[int, set[int]] = {}
     for e in nfa["edges"]:
@@ -123,25 +113,29 @@ def _determinize_theory(nfa: dict[str, Any]) -> dict[str, Any]:
             move.setdefault((e["from"], e["symbol"]), set()).add(e["to"])
 
     def eps_closure(states):
-        states = set(states)
-        stack = list(states)
-        while stack:
-            s = stack.pop()
-            for t in eps_targets.get(s, ()):
-                if t not in states:
-                    states.add(t)
-                    stack.append(t)
-        return frozenset(states)
+        closure = set(states)
+        frontier = sorted(closure)
+        while frontier:
+            next_frontier = []
+            for s in frontier:
+                for t in sorted(eps_targets.get(s, ())):
+                    if t not in closure:
+                        closure.add(t)
+                        next_frontier.append(t)
+            frontier = sorted(next_frontier)
+        return tuple(sorted(closure))  # canonical sorted tuple, safe as a dict key
 
-    alphabet = [s for s in nfa["alphabet"]]
+    alphabet = [s for s in nfa["alphabet"]]  # already sorted by _build_theory_nfa
     accepts_set = set(nfa["accepts"])
     start_key = eps_closure(nfa["starts"])
     dfa_states = {start_key: 0}
     order = [start_key]
     dfa_edges = []
-    frontier = [start_key]
-    while frontier:
-        current = frontier.pop()
+    frontier = [start_key]  # processed FIFO, not Python's LIFO .pop()
+    queue_index = 0
+    while queue_index < len(frontier):
+        current = frontier[queue_index]
+        queue_index += 1
         current_id = dfa_states[current]
         for symbol in alphabet:
             nxt = set()
@@ -156,7 +150,7 @@ def _determinize_theory(nfa: dict[str, Any]) -> dict[str, Any]:
                 frontier.append(nxt)
             dfa_edges.append({"from": current_id, "to": dfa_states[nxt], "symbol": symbol})
 
-    dfa_accepts = sorted(i for i, s in enumerate(order) if s & accepts_set)
+    dfa_accepts = sorted(i for i, s in enumerate(order) if set(s) & accepts_set)
     return {
         "states": len(order),
         "starts": [0],

@@ -414,7 +414,67 @@ function ensureRegexSyntaxSelect() {
   });
   select.style.marginLeft = "6px";
   modeSelect.insertAdjacentElement("afterend", select);
+  ensureRegexLeanButton(select);
   return select;
+}
+
+// Lean verification currently only covers theory-syntax ep-NFA output
+// (lean_regex_check.py's by-decide equality theorem against
+// RegexNFA.compileRegex). DFA mode gets this disabled until the DFA path
+// has its own proof mechanism, rather than a confusing failure message.
+function ensureRegexLeanButton(syntaxSelect) {
+  var existing = document.getElementById("automata-regex-lean");
+  if (existing) return existing;
+  var btn = document.createElement("button");
+  btn.type = "button";
+  btn.id = "automata-regex-lean";
+  btn.textContent = "Verify with Lean";
+  btn.style.marginLeft = "6px";
+  btn.addEventListener("click", automataVerifyRegexWithLean);
+  syntaxSelect.insertAdjacentElement("afterend", btn);
+
+  function sync() {
+    var modeSelect = document.getElementById("automata-regex-mode");
+    var syntax = syntaxSelect.value;
+    var mode = modeSelect ? modeSelect.value : "nfa";
+    var supported = syntax === "theory";
+    btn.disabled = !supported;
+    btn.title = supported
+      ? "Check that Python and Lean agree exactly on this construction (\u03b5-NFA, plus the DFA step when DFA output is selected)"
+      : "Lean verification currently only covers the formal (theory) syntax";
+  }
+  syntaxSelect.addEventListener("change", sync);
+  var modeSelect = document.getElementById("automata-regex-mode");
+  if (modeSelect) modeSelect.addEventListener("change", sync);
+  sync();
+  return btn;
+}
+
+function automataVerifyRegexWithLean() {
+  var input = document.getElementById("automata-regex");
+  var btn = document.getElementById("automata-regex-lean");
+  var expression = input.value.trim();
+  if (!expression) { automataStatusMessage = "Enter a regular expression first."; refreshAutomataPanel(true); return; }
+  btn.disabled = true;
+  automataStatusMessage = "Verifying this construction with Lean (this can take a while on a cold PyPantograph start)\u2026";
+  refreshAutomataPanel(true);
+  fetch("/api/automata/lean-regex-check", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ regex: expression, mode: (document.getElementById("automata-regex-mode") || {}).value || "nfa" }),
+  })
+    .then(function (response) { return response.json(); })
+    .then(function (result) {
+      automataStatusMessage = result.message || (result.ok ? "Lean verification succeeded." : "Lean verification failed.");
+      refreshAutomataPanel(true);
+    })
+    .catch(function (error) {
+      automataStatusMessage = "Lean verification request failed: " + error.message;
+      refreshAutomataPanel(true);
+    })
+    .finally(function () {
+      btn.disabled = false;
+    });
 }
 
 function automataGenerateRegex() {

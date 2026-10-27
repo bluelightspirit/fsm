@@ -306,6 +306,11 @@ function draw() {
 function selectObject(x, y, extraTolerance, preferLinks) {
   extraTolerance = extraTolerance || 0;
   if (preferLinks) {
+    // A click inside a state's circle always means that state. Lines only win
+    // when the click lands outside every state.
+    for (var ni = 0; ni < nodes.length; ni++) {
+      if (nodes[ni].containsPoint(x, y, 0)) return nodes[ni];
+    }
     for (var li = links.length - 1; li >= 0; li--) {
       if (links[li].containsPoint(x, y, extraTolerance)) return links[li];
     }
@@ -435,14 +440,17 @@ window.onload = function () {
 
     draw();
 
-    if (canvasHasFocus()) {
-      // disable drag-and-drop only if the canvas is already focused
-      return false;
-    } else {
-      // otherwise, let the browser switch the focus away from wherever it was
+    // Always claim the click. Letting the browser run its default action
+    // whenever a panel control still had focus made the first click or drag on
+    // a state unreliable, so move focus off the control ourselves instead.
+    if (!canvasHasFocus()) {
+      var focusedElement = document.activeElement;
+      if (focusedElement && focusedElement !== document.body && typeof focusedElement.blur === "function") {
+        focusedElement.blur();
+      }
       resetCaret();
-      return true;
     }
+    return false;
   };
 
   canvas.ondblclick = function (e) {

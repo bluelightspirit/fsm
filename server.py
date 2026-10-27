@@ -64,7 +64,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         endpoint = urlparse(self.path).path
-        if endpoint not in ("/api/lean/check", "/api/automata/regex"):
+        if endpoint not in ("/api/lean/check", "/api/automata/regex", "/api/automata/lean-regex-check"):
             self._send_json(404, {"error": "Not found"})
             return
         try:
@@ -76,6 +76,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if endpoint == "/api/lean/check":
                 result = check_with_pypantograph(payload)
                 self._send_json(200, {"lean": result})
+            elif endpoint == "/api/automata/lean-regex-check":
+                from lean_regex_check import check_regex_construction_with_lean
+                result = check_regex_construction_with_lean(payload)
+                self._send_json(200, result)
             else:
                 result = regex_to_automaton(payload)
                 self._send_json(200, {"automaton": result})

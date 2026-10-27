@@ -8,15 +8,21 @@ function ExportAsLaTeX() {
   this._opts = function () {
     return this.strokeStyle + ", line width=" + fixed(this.lineWidth * 0.75, 2) + "pt";
   };
+  // Clip edges are pulled inward by CLIP_INSET picture units (1 unit = 10 px), and in standalone
+  // mode the page is trimmed from the top/right by ~1.37e-5 of its size (see patch_latex_trim_final.py).
+  var CLIP_INSET = 0.013, PAGE_TRIM_RATIO_W = 1.3563e-5, PAGE_TRIM_RATIO_H = 1.3889e-5;
+  // Real paper size in px. The editor's pageW/pageH are rounded to a whole-pixel grid; margins must be
+  // measured from the real paper edges (see patch_latex_a4_margins.py).
+  function paperPx(ppi) { var s = PAGE_SIZES[pageSizeKey]; return { w: s.w * ppi, h: s.h * ppi }; }
   this.beginNodeClip = function (page, margins, ppi, pageW, pageH) {
-    this._texData += "\\begin{scope}\n\\clip (" + (margins.left * ppi * 0.1).toFixed(3) + "," + (-(page * pageH + margins.top * ppi) * 0.1).toFixed(3) + ") rectangle (" + ((pageW - margins.right * ppi) * 0.1).toFixed(3) + "," + (-(page * pageH + pageH - margins.bottom * ppi) * 0.1).toFixed(3) + ");\n";
+    this._texData += "\\begin{scope}\n\\clip (" + (margins.left * ppi * 0.1 + CLIP_INSET).toFixed(3) + "," + (-(page * pageH + margins.top * ppi) * 0.1 - CLIP_INSET).toFixed(3) + ") rectangle (" + ((paperPx(ppi).w - margins.right * ppi) * 0.1 - CLIP_INSET).toFixed(3) + "," + (-(page * pageH + paperPx(ppi).h - margins.bottom * ppi) * 0.1 + CLIP_INSET).toFixed(3) + ");\n";
   };
   this.endNodeClip = function () { this._texData += "\\end{scope}\n"; };
   this.beginArrowClip = function (pages, margins, ppi, pageW, pageH) {
     this._texData += "\\begin{scope}\n\\clip ";
     for (var p = 0; p < pages; p++) {
       if (p) this._texData += " ";
-      this._texData += "(" + (margins.left * ppi * 0.1).toFixed(3) + "," + (-(p * pageH + margins.top * ppi) * 0.1).toFixed(3) + ") rectangle (" + ((pageW - margins.right * ppi) * 0.1).toFixed(3) + "," + (-(p * pageH + pageH - margins.bottom * ppi) * 0.1).toFixed(3) + ")";
+      this._texData += "(" + (margins.left * ppi * 0.1 + CLIP_INSET).toFixed(3) + "," + (-(p * pageH + margins.top * ppi) * 0.1 - CLIP_INSET).toFixed(3) + ") rectangle (" + ((paperPx(ppi).w - margins.right * ppi) * 0.1 - CLIP_INSET).toFixed(3) + "," + (-(p * pageH + paperPx(ppi).h - margins.bottom * ppi) * 0.1 + CLIP_INSET).toFixed(3) + ")";
     }
     this._texData += ";\n";
   };
@@ -54,6 +60,8 @@ function ExportAsLaTeX() {
     var pageSize = PAGE_SIZES[pageSizeKey];
     var width = pageSize.w * 9.6, height = pageSize.h * 9.6;
     var outputPages = pageMode === false ? 1 : pages;
+    var trimW = standalone ? width * PAGE_TRIM_RATIO_W : 0;
+    var trimH = standalone ? height * PAGE_TRIM_RATIO_H : 0;
     if (pageMode === false) height *= pages;
     for (var p = 0; p < outputPages; p++) {
       if (p && !standalone) paged += "\\FSMPageBreak\n";
@@ -63,8 +71,8 @@ function ExportAsLaTeX() {
       });
       var picture =
         "\\begin{tikzpicture}[x=0.264583cm,y=0.264583cm]\n" +
-        "\\path[use as bounding box] (0,0) rectangle (" + width.toFixed(3) + "," + (-height).toFixed(3) + ");\n" +
-        "\\clip (0,0) rectangle (" + width.toFixed(3) + "," + (-height).toFixed(3) + ");\n" +
+        "\\path[use as bounding box] (0," + (-trimH).toFixed(6) + ") rectangle (" + (width - trimW).toFixed(6) + "," + (-height).toFixed(3) + ");\n" +
+        "\\clip (0," + (-trimH).toFixed(6) + ") rectangle (" + (width - trimW).toFixed(6) + "," + (-height).toFixed(3) + ");\n" +
         "\\tikzstyle{every node}+=[inner sep=0pt]\n" +
         pageData +
         "\\end{tikzpicture}\n";

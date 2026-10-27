@@ -36,15 +36,21 @@ function ExportAsLaTeX() {
   this._opts = function () {
     return this.strokeStyle + ", line width=" + fixed(this.lineWidth * 0.75, 2) + "pt";
   };
+  // Clip edges are pulled inward by CLIP_INSET picture units (1 unit = 10 px), and in standalone
+  // mode the page is trimmed from the top/right by ~1.37e-5 of its size (see patch_latex_trim_final.py).
+  var CLIP_INSET = 0.013, PAGE_TRIM_RATIO_W = 1.3563e-5, PAGE_TRIM_RATIO_H = 1.3889e-5;
+  // Real paper size in px. The editor's pageW/pageH are rounded to a whole-pixel grid; margins must be
+  // measured from the real paper edges (see patch_latex_a4_margins.py).
+  function paperPx(ppi) { var s = PAGE_SIZES[pageSizeKey]; return { w: s.w * ppi, h: s.h * ppi }; }
   this.beginNodeClip = function (page, margins, ppi, pageW, pageH) {
-    this._texData += "\\begin{scope}\n\\clip (" + (margins.left * ppi * 0.1).toFixed(3) + "," + (-(page * pageH + margins.top * ppi) * 0.1).toFixed(3) + ") rectangle (" + ((pageW - margins.right * ppi) * 0.1).toFixed(3) + "," + (-(page * pageH + pageH - margins.bottom * ppi) * 0.1).toFixed(3) + ");\n";
+    this._texData += "\\begin{scope}\n\\clip (" + (margins.left * ppi * 0.1 + CLIP_INSET).toFixed(3) + "," + (-(page * pageH + margins.top * ppi) * 0.1 - CLIP_INSET).toFixed(3) + ") rectangle (" + ((paperPx(ppi).w - margins.right * ppi) * 0.1 - CLIP_INSET).toFixed(3) + "," + (-(page * pageH + paperPx(ppi).h - margins.bottom * ppi) * 0.1 + CLIP_INSET).toFixed(3) + ");\n";
   };
   this.endNodeClip = function () { this._texData += "\\end{scope}\n"; };
   this.beginArrowClip = function (pages, margins, ppi, pageW, pageH) {
     this._texData += "\\begin{scope}\n\\clip ";
     for (var p = 0; p < pages; p++) {
       if (p) this._texData += " ";
-      this._texData += "(" + (margins.left * ppi * 0.1).toFixed(3) + "," + (-(p * pageH + margins.top * ppi) * 0.1).toFixed(3) + ") rectangle (" + ((pageW - margins.right * ppi) * 0.1).toFixed(3) + "," + (-(p * pageH + pageH - margins.bottom * ppi) * 0.1).toFixed(3) + ")";
+      this._texData += "(" + (margins.left * ppi * 0.1 + CLIP_INSET).toFixed(3) + "," + (-(p * pageH + margins.top * ppi) * 0.1 - CLIP_INSET).toFixed(3) + ") rectangle (" + ((paperPx(ppi).w - margins.right * ppi) * 0.1 - CLIP_INSET).toFixed(3) + "," + (-(p * pageH + paperPx(ppi).h - margins.bottom * ppi) * 0.1 + CLIP_INSET).toFixed(3) + ")";
     }
     this._texData += ";\n";
   };
@@ -82,6 +88,8 @@ function ExportAsLaTeX() {
     var pageSize = PAGE_SIZES[pageSizeKey];
     var width = pageSize.w * 9.6, height = pageSize.h * 9.6;
     var outputPages = pageMode === false ? 1 : pages;
+    var trimW = standalone ? width * PAGE_TRIM_RATIO_W : 0;
+    var trimH = standalone ? height * PAGE_TRIM_RATIO_H : 0;
     if (pageMode === false) height *= pages;
     for (var p = 0; p < outputPages; p++) {
       if (p && !standalone) paged += "\\FSMPageBreak\n";
@@ -91,8 +99,8 @@ function ExportAsLaTeX() {
       });
       var picture =
         "\\begin{tikzpicture}[x=0.264583cm,y=0.264583cm]\n" +
-        "\\path[use as bounding box] (0,0) rectangle (" + width.toFixed(3) + "," + (-height).toFixed(3) + ");\n" +
-        "\\clip (0,0) rectangle (" + width.toFixed(3) + "," + (-height).toFixed(3) + ");\n" +
+        "\\path[use as bounding box] (0," + (-trimH).toFixed(6) + ") rectangle (" + (width - trimW).toFixed(6) + "," + (-height).toFixed(3) + ");\n" +
+        "\\clip (0," + (-trimH).toFixed(6) + ") rectangle (" + (width - trimW).toFixed(6) + "," + (-height).toFixed(3) + ");\n" +
         "\\tikzstyle{every node}+=[inner sep=0pt]\n" +
         pageData +
         "\\end{tikzpicture}\n";
@@ -1136,7 +1144,67 @@ function ensureRegexSyntaxSelect() {
   });
   select.style.marginLeft = "6px";
   modeSelect.insertAdjacentElement("afterend", select);
+  ensureRegexLeanButton(select);
   return select;
+}
+
+// Lean verification currently only covers theory-syntax ep-NFA output
+// (lean_regex_check.py's by-decide equality theorem against
+// RegexNFA.compileRegex). DFA mode gets this disabled until the DFA path
+// has its own proof mechanism, rather than a confusing failure message.
+function ensureRegexLeanButton(syntaxSelect) {
+  var existing = document.getElementById("automata-regex-lean");
+  if (existing) return existing;
+  var btn = document.createElement("button");
+  btn.type = "button";
+  btn.id = "automata-regex-lean";
+  btn.textContent = "Verify with Lean";
+  btn.style.marginLeft = "6px";
+  btn.addEventListener("click", automataVerifyRegexWithLean);
+  syntaxSelect.insertAdjacentElement("afterend", btn);
+
+  function sync() {
+    var modeSelect = document.getElementById("automata-regex-mode");
+    var syntax = syntaxSelect.value;
+    var mode = modeSelect ? modeSelect.value : "nfa";
+    var supported = syntax === "theory";
+    btn.disabled = !supported;
+    btn.title = supported
+      ? "Check that Python and Lean agree exactly on this construction (\u03b5-NFA, plus the DFA step when DFA output is selected)"
+      : "Lean verification currently only covers the formal (theory) syntax";
+  }
+  syntaxSelect.addEventListener("change", sync);
+  var modeSelect = document.getElementById("automata-regex-mode");
+  if (modeSelect) modeSelect.addEventListener("change", sync);
+  sync();
+  return btn;
+}
+
+function automataVerifyRegexWithLean() {
+  var input = document.getElementById("automata-regex");
+  var btn = document.getElementById("automata-regex-lean");
+  var expression = input.value.trim();
+  if (!expression) { automataStatusMessage = "Enter a regular expression first."; refreshAutomataPanel(true); return; }
+  btn.disabled = true;
+  automataStatusMessage = "Verifying this construction with Lean (this can take a while on a cold PyPantograph start)\u2026";
+  refreshAutomataPanel(true);
+  fetch("/api/automata/lean-regex-check", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ regex: expression, mode: (document.getElementById("automata-regex-mode") || {}).value || "nfa" }),
+  })
+    .then(function (response) { return response.json(); })
+    .then(function (result) {
+      automataStatusMessage = result.message || (result.ok ? "Lean verification succeeded." : "Lean verification failed.");
+      refreshAutomataPanel(true);
+    })
+    .catch(function (error) {
+      automataStatusMessage = "Lean verification request failed: " + error.message;
+      refreshAutomataPanel(true);
+    })
+    .finally(function () {
+      btn.disabled = false;
+    });
 }
 
 function automataGenerateRegex() {
@@ -1701,6 +1769,11 @@ function draw() {
 function selectObject(x, y, extraTolerance, preferLinks) {
   extraTolerance = extraTolerance || 0;
   if (preferLinks) {
+    // A click inside a state's circle always means that state. Lines only win
+    // when the click lands outside every state.
+    for (var ni = 0; ni < nodes.length; ni++) {
+      if (nodes[ni].containsPoint(x, y, 0)) return nodes[ni];
+    }
     for (var li = links.length - 1; li >= 0; li--) {
       if (links[li].containsPoint(x, y, extraTolerance)) return links[li];
     }
@@ -1830,14 +1903,17 @@ window.onload = function () {
 
     draw();
 
-    if (canvasHasFocus()) {
-      // disable drag-and-drop only if the canvas is already focused
-      return false;
-    } else {
-      // otherwise, let the browser switch the focus away from wherever it was
+    // Always claim the click. Letting the browser run its default action
+    // whenever a panel control still had focus made the first click or drag on
+    // a state unreliable, so move focus off the control ourselves instead.
+    if (!canvasHasFocus()) {
+      var focusedElement = document.activeElement;
+      if (focusedElement && focusedElement !== document.body && typeof focusedElement.blur === "function") {
+        focusedElement.blur();
+      }
       resetCaret();
-      return true;
     }
+    return false;
   };
 
   canvas.ondblclick = function (e) {
