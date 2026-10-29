@@ -1,7 +1,6 @@
-"""Shared Glushkov (position) automaton construction, factored out so both
-the formal-theory parser (formal_regex.py) and the Python-style parser
-(glushkov_regex.py) can feed it the same AST shape without duplicating the
-construction logic:
+"""Glushkov (position) automaton construction plus subset construction, used by the
+Python-style regex (glushkov_regex.py) and its DFA output. The formal syntax does not
+use this module: it is compiled by thompson_port.py. The AST shape is:
 
   ("empty",) | ("leaf", label) | ("alt", l, r) | ("cat", l, r)
   | ("star", x) | ("plus", x) | ("opt", x)

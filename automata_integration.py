@@ -1,25 +1,21 @@
 """Regex -> automaton conversion for the browser-based FSM editor.
 
-Supports two regex dialects (see "syntax" in the request payload):
-  - "python"  (default): glushkov_regex.py - a clean-room Glushkov (position)
-              automaton construction. Built specifically because Pyformlang's
-              PythonRegex expands a character class like \\d into ten
-              separate literal-digit Thompson-construction branches, which
-              made diagrams unusably large for common patterns (observed:
-              ~80-160 states for \\d+(\\.\\d\\d)? ). Verified against
-              Python's own `re` module across millions of test strings.
-  - "theory": EXPERIMENTAL, pending a Lean-backed replacement. Calls real
-              pyformlang.regular_expression.Regex directly - the formal/
-              textbook dialect (concatenation via space/'.', union via '|'
-              or '+', '*' only, "epsilon"/'$' for the empty string,
-              multi-character symbols unless separated - e.g. "abb" with no
-              separator is ONE symbol, not three - this is Pyformlang's own
-              documented behavior, not an artifact of any reimplementation).
-              This dialect has no character classes, so it isn't subject to
-              the \\d-expansion problem above; using the real library here
-              removes any risk of subtle divergence from a hand-written
-              parser, which matters for something explicitly labeled
-              "formal" even though it's marked experimental.
+Two regex dialects, chosen by "syntax" in the request payload:
+
+  "python" (default): Python-style sugar - literals, `.`, \\d \\w \\s, [...] classes, `|`, `* + ?`,
+      groups. Built with a Glushkov (position) automaton in glushkov_regex.py / glushkov_core.py:
+      no epsilon edges, and a character class is ONE symbol instead of one branch per character.
+
+  "theory" (EXPERIMENTAL): textbook regular expressions. Every character is its own symbol
+      (`abb` is a, b, b); union is `+` or `|`, star is `*`, `epsilon` or `$` is the empty string,
+      grouping with parentheses. Parsed by classic_regex.py and compiled to an epsilon-NFA by
+      thompson_port.py, a Python port of the Lean implementation in lean_regex_check.py, so the
+      "Verify with Lean" button can check that the two agree. DFA output uses subset
+      construction with epsilon-closure, written to be deterministic (sorted, FIFO) so the
+      Lean side can reproduce it exactly.
+
+Both end in the same JSON shape: nodes, starts, accepts, edges, alphabet. DFA output is made
+total by routing missing transitions to a shared sink state (not covered by the Lean check).
 """
 
 from __future__ import annotations

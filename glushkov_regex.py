@@ -1,19 +1,14 @@
-"""Python-style regex syntax (EXPERIMENTAL): literals, `.` (any), \d \w \s
-\D \W \S, bracket expressions [abc]/[a-z]/[^...], escaped literals,
-alternation `|`, concatenation, grouping `(...)`, and the quantifiers
-`*` `+` `?`.
+r"""Python-style regex syntax (the default dialect): literals, `.` (any), \d \w \s \D \W \S,
+bracket expressions [abc] / [a-z] / [^...], escaped literals, alternation `|`, concatenation,
+grouping `(...)`, and the quantifiers `*` `+` `?`.
 
-Character classes and bracket expressions are each treated as ONE atomic
-alphabet symbol (e.g. \d becomes a single edge labeled "d"), rather than
-being expanded into a branch per concrete character - that's what keeps the
-resulting automaton small. Thompson-style libraries that expand \d into
-0|1|2|...|9 pay a 10x-per-occurrence cost that this construction never
-introduces in the first place.
+Character classes and bracket expressions are each ONE atomic alphabet symbol (e.g. \d becomes a
+single edge labelled "d") rather than a branch per concrete character, which is what keeps the
+resulting automaton small. Note that the label for \d is the same as for a literal letter d, so a
+pattern that mixes the two draws an ambiguous diagram.
 
-This is the informal, Python-`re`-flavored dialect - see formal_regex.py for
-the formal/textbook dialect (pyformlang.Regex-compatible), which is the
-primary, non-experimental option. Not supported here yet: anchors (^ $),
-{m,n} repetition counts, backreferences, lookaround.
+The textbook dialect, where every character is its own symbol, lives in classic_regex.py.
+Not supported here: anchors (^ $), {m,n} counts, backreferences, lookaround.
 """
 from __future__ import annotations
 

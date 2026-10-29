@@ -406,7 +406,7 @@ function ensureRegexSyntaxSelect() {
   if (!modeSelect) return null;
   var select = document.createElement("select");
   select.id = "automata-regex-syntax";
-  select.title = "Formal (theory): pyformlang.Regex-compatible syntax (|, +, *, 'epsilon'; multi-character symbols unless separated). Python-style: experimental Python-re-flavored sugar (\\d, [...], ?).";
+  select.title = "Python-style (default): familiar regex sugar such as \\d, [a-z], ?. Formal (theory, experimental): textbook regex - every character is its own symbol, + or | is union, * is star, 'epsilon' or $ is the empty string.";
   [["python", "Python-style regex"], ["theory", "Formal (theory) regex (experimental)"]].forEach(function (pair) {
     var opt = document.createElement("option");
     opt.value = pair[0]; opt.textContent = pair[1];

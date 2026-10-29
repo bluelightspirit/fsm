@@ -4,8 +4,8 @@ adjacency (ab = a.b), '|' or '+' for union, '*' for Kleene star, '(' ')' for
 grouping, 'epsilon' or '$' for the empty string. No multi-character token
 merging (unlike pyformlang.Regex) - this is the deliberate fix for that.
 
-Adapted from formal_regex.py's already-tested tokenizer/parser, with the
-symbol-run-merging behavior removed: every character (or backslash-escape)
+Derived from an earlier pyformlang-style tokenizer/parser (formal_regex.py, since
+removed - see git history), with the symbol-run-merging behavior removed: every character (or backslash-escape)
 is its own leaf, period.
 
 Produces a JSON-serializable AST matching the Lean `Regex` inductive type

@@ -1,2 +1,10 @@
--r requirements-lean.txt
--r requirements-automata.txt
+# Finite State Machine Designer - base install.
+#
+# The editor, the exports, and both regex-to-automaton converters use only the Python
+# standard library, so there is nothing to install here:
+#
+#     python3 server.py
+#
+# Optional extras:
+#   requirements-lean.txt   PyPantograph, for the "Check with Lean" / "Verify with Lean"
+#                           buttons (needs git and a Lean 4 toolchain installed via elan).
