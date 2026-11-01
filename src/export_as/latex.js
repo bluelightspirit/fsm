@@ -52,12 +52,85 @@ function ExportAsLaTeX() {
 
   // json: optional snapshot string, embedded as a comment so the diagram can be restored later.
   // standalone: full document (cropped to the diagram) vs. just the tikzpicture to paste.
-  this.toLaTeX = function (json, standalone, pages, margins, constrainMargins, pageMode) {
+  function escapePlainText(text) {
+    var replacements = { "\\": "\\textbackslash{}", "{": "\\{", "}": "\\}", "$": "\\$", "&": "\\&", "#": "\\#", "%": "\\%", "_": "\\_", "^": "\\textasciicircum{}", "~": "\\textasciitilde{}" };
+    return String(text || "").replace(/[\\{}$&#%_^~]/g, function (ch) { return replacements[ch]; });
+  }
+  function flowTextLatex(text) {
+    return String(text || "").trim().split(/\n\s*\n/).filter(Boolean).map(function (paragraph) {
+      return "\\noindent " + escapePlainText(paragraph.replace(/\s*\n\s*/g, " "));
+    }).join("\n\\par\n");
+  }
+  this.toLaTeX = function (json, standalone, pages, margins, constrainMargins, pageMode, followingText, flowOptions, precedingText) {
     var data = json ? "% fsm-data: " + String(json).replace(/[\r\n]+/g, " ") + "\n" : "";
     pages = Math.max(1, Math.min(20, Math.round(pages || 1)));
     margins = margins || { top: 1, bottom: 1, left: 1, right: 1 };
     var paged = "";
     var pageSize = PAGE_SIZES[pageSizeKey];
+    if (pageMode === "flow") {
+      if (flowOptions) {
+        var cmPerPx = 2.54 / 96;
+        var texDrawing = this._texData;
+        var pictureHeight = flowOptions.bounds.height;
+        var shiftX = flowOptions.left - flowOptions.bounds.x;
+        function pictureCode(height, yShift) {
+          return "\\begin{tikzpicture}[x=0.264583cm,y=0.264583cm]\n" +
+            "\\path[use as bounding box] (0,0) rectangle (" + (flowOptions.width / 10).toFixed(4) + "," + (-height / 10).toFixed(4) + ");\n" +
+            "\\clip (0,0) rectangle (" + (flowOptions.width / 10).toFixed(4) + "," + (-height / 10).toFixed(4) + ");\n" +
+            "\\begin{scope}[shift={(" + (shiftX * cmPerPx).toFixed(4) + "cm," + (yShift * cmPerPx).toFixed(4) + "cm)}]\n" +
+            "\\tikzstyle{every node}+=[inner sep=0pt]\n" + texDrawing + "\\end{scope}\n\\end{tikzpicture}\n";
+        }
+        var flowPicture = pictureCode(pictureHeight, flowOptions.bounds.y);
+        var embeddedPicture = pictureCode(flowOptions.top + pictureHeight, flowOptions.bounds.y - flowOptions.top);
+        var beforeBody = flowTextLatex(precedingText), textBody = flowTextLatex(followingText);
+        function paragraphBlock(body, width) {
+          return body ? "\\noindent\\hspace*{" + (flowOptions.left / 96).toFixed(4) + "in}\\begin{minipage}{" + width + "}\n\\fontsize{12}{18}\\selectfont\n" + body + "\\end{minipage}\\par\n" : "";
+        }
+        var flowBody = "\\vspace*{" + (flowOptions.top / 96).toFixed(4) + "in}\n";
+        flowBody += paragraphBlock(beforeBody, (flowOptions.contentWidth / 96).toFixed(4) + "in");
+        if (beforeBody) flowBody += "\\vspace*{" + (flowOptions.gap / 96).toFixed(4) + "in}\n";
+        flowBody += "\\noindent " + flowPicture + "\\par\n";
+        flowBody += "\\vspace*{" + (flowOptions.gap / 96).toFixed(4) + "in}\n";
+        flowBody += paragraphBlock(textBody, (flowOptions.contentWidth / 96).toFixed(4) + "in");
+        flowBody += "\\noindent\\rule{0pt}{" + (flowOptions.bottom / 96).toFixed(4) + "in}\\par\n";
+        if (!standalone) {
+          var embeddedBody = "\\par\n" + beforeBody + (beforeBody ? "\\par\\vspace*{" + (flowOptions.gap / 96).toFixed(4) + "in}\n" : "");
+          embeddedBody += "\\begingroup\n\\sbox0{" + embeddedPicture + "}\n\\sbox1{\\copy0}\n";
+          embeddedBody += "\\ifdim\\wd1>\\linewidth \\sbox1{\\resizebox{\\linewidth}{!}{\\copy0}}\\fi\n";
+          embeddedBody += "\\dimen0=\\dimexpr\\pagegoal-\\pagetotal-" + (flowOptions.gap / 96).toFixed(4) + "in" + (textBody ? "-\\baselineskip" : "") + "\\relax\n";
+          embeddedBody += "\\ifdim\\dimen0<1pt \\dimen0=1pt \\fi\n";
+          embeddedBody += "\\ifdim\\dimexpr\\ht1+\\dp1\\relax>\\dimen0 \\sbox1{\\resizebox{!}{\\dimen0}{\\copy1}}\\fi\n";
+          embeddedBody += "\\noindent\\usebox1\\par\n\\endgroup\n\\vspace*{" + (flowOptions.gap / 96).toFixed(4) + "in}\n" + textBody + "\\par\n";
+          return data + "% Requires \\usepackage{tikz,graphicx} in the host document.\n" +
+            "% Fit calculation assumes the selected paper size and bottom margin " + (flowOptions.bottom / 96).toFixed(4) + "in.\n" + embeddedBody;
+        }
+        return data +
+          "\\documentclass{article}\n\\usepackage[paperwidth=" + (flowOptions.width / 96).toFixed(4) + "in,paperheight=" + (flowOptions.height / 96).toFixed(4) + "in,margin=0pt]{geometry}\n\\usepackage{tikz}\n\\pagestyle{empty}\n\\setlength{\\parindent}{0pt}\n\\setlength{\\topskip}{0pt}\n\\setlength{\\parskip}{0pt}\n\\begin{document}\n" +
+          "\\begin{minipage}{" + (flowOptions.width / 96).toFixed(4) + "in}\n" + flowBody + "\\end{minipage}\n\\end{document}\n";
+      }
+      var flowPicture =
+        "\\begingroup\n" +
+        "\\sbox0{\\begin{tikzpicture}[x=0.264583cm,y=0.264583cm]\n" +
+        "\\tikzstyle{every node}+=[inner sep=0pt]\n" + this._texData +
+        "\\end{tikzpicture}}\n" +
+        "\\sbox1{\\resizebox{\\linewidth}{!}{\\copy0}}\n" +
+        "\\sbox2{\\resizebox{!}{\\textheight}{\\copy0}}\n" +
+        "\\ifdim\\wd0>\\linewidth\n" +
+        "  \\ifdim\\dimexpr\\ht1+\\dp1\\relax>\\textheight \\copy2 \\else \\copy1 \\fi\n" +
+        "\\else\n" +
+        "  \\ifdim\\dimexpr\\ht0+\\dp0\\relax>\\textheight \\copy2 \\else \\copy0 \\fi\n" +
+        "\\fi\n\\endgroup\n\\par\\medskip\n";
+      var flowBody = flowPicture + flowTextLatex(followingText) + "\n";
+      if (!standalone) return data +
+        "% Requires \\usepackage{tikz,graphicx} in the host document.\n" +
+        "% Set the host page margins to top=" + margins.top + "in, bottom=" + margins.bottom + "in, left=" + margins.left + "in, right=" + margins.right + "in.\n" +
+        flowBody;
+      return data +
+        "\\documentclass{article}\n" +
+        "\\usepackage[paperwidth=" + pageSize.w + "in,paperheight=" + pageSize.h + "in,top=" + margins.top + "in,bottom=" + margins.bottom + "in,left=" + margins.left + "in,right=" + margins.right + "in]{geometry}\n" +
+        "\\usepackage{tikz}\n\\usepackage{graphicx}\n" +
+        "\\setlength{\\parindent}{0pt}\n\\begin{document}\n" + flowBody + "\\end{document}\n";
+    }
     var width = pageSize.w * 9.6, height = pageSize.h * 9.6;
     var outputPages = pageMode === false ? 1 : pages;
     var trimW = standalone ? width * PAGE_TRIM_RATIO_W : 0;

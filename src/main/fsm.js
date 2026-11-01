@@ -202,11 +202,11 @@ function getDrawColors() {
 
 var EXPORT_COLORS = { fg: "black", selected: "black" };
 
-function drawUsing(c, colors, ignoreMarginClip) {
+function drawUsing(c, colors, ignoreMarginClip, preserveCanvas) {
   colors = colors || getDrawColors();
   var editorContext = c.canvas === canvas && typeof c.scale === "function";
   var ratio = editorContext && typeof editorPixelRatio === "function" ? editorPixelRatio() : 1;
-  c.clearRect(0, 0, canvas.width, canvas.height);
+  if (!preserveCanvas) c.clearRect(0, 0, canvas.width, canvas.height);
   c.save();
   if (editorContext) c.scale(ratio, ratio);
   c.translate(0.5, 0.5);
@@ -292,6 +292,105 @@ function drawUsing(c, colors, ignoreMarginClip) {
     if (selectedObject instanceof Link && selectedObject.getEndPointsAndCircle().hasCurve) selectedObject.drawCurveHandles(editorCtx);
     editorCtx.restore();
   }
+}
+
+function flowTextLines(text, width) {
+  if (!String(text || "").trim()) return [];
+  var measure = document.createElement("canvas").getContext("2d");
+  var fontSize = 16, lineHeight = 24;
+  measure.font = styleFontCSS(fontSize);
+  var paragraphs = String(text).trim().split(/\n\s*\n/);
+  var lines = [];
+  paragraphs.forEach(function (paragraph, paragraphIndex) {
+    var words = paragraph.replace(/\s*\n\s*/g, " ").split(/\s+/).filter(Boolean);
+    var line = "";
+    words.forEach(function (word) {
+      var candidate = line ? line + " " + word : word;
+      if (line && measure.measureText(candidate).width > width) {
+        lines.push({ text: line, paragraphEnd: false });
+        line = word;
+      } else line = candidate;
+    });
+    if (line) lines.push({ text: line, paragraphEnd: paragraphIndex < paragraphs.length - 1 });
+  });
+  return lines.map(function (line) { line.fontSize = fontSize; line.lineHeight = lineHeight; return line; });
+}
+
+function measureDiagramInk() {
+  var width = pageWidthPx(), height = pageHeightPx() * pageCount;
+  var probe = document.createElement("canvas");
+  probe.width = width; probe.height = height;
+  var ctx = probe.getContext("2d", { willReadFrequently: true });
+  var wasLocked = constrainToMargins, oldSelected = selectedObject;
+  constrainToMargins = false; selectedObject = null;
+  try { drawUsing(ctx, EXPORT_COLORS, true, true); }
+  finally { constrainToMargins = wasLocked; selectedObject = oldSelected; }
+  var pixels = ctx.getImageData(0, 0, width, height).data;
+  var minX = width, minY = height, maxX = -1, maxY = -1;
+  for (var y = 0; y < height; y++) for (var x = 0; x < width; x++) {
+    if (pixels[(y * width + x) * 4 + 3] !== 0) {
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+    }
+  }
+  if (maxX < minX || maxY < minY) return { x: 0, y: 0, width: 0, height: 0 };
+  minX = Math.max(0, minX - 1); minY = Math.max(0, minY - 1);
+  maxX = Math.min(width - 1, maxX + 1); maxY = Math.min(height - 1, maxY + 1);
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+}
+
+function flowExportOptions(beforeText, afterText, ppi) {
+  var bounds = measureDiagramInk();
+  var margins = pageMarginsForExport();
+  var scale = (ppi || 96) / 96;
+  var contentWidth = bounds.width || Math.max(1, pageWidthPx() - (margins.left + margins.right) * PX_PER_INCH);
+  var beforeLines = flowTextLines(beforeText, contentWidth), afterLines = flowTextLines(afterText, contentWidth);
+  function textHeight(lines) { return lines.reduce(function (sum, line, index) {
+    return sum + line.lineHeight + (index && lines[index - 1].paragraphEnd ? line.lineHeight * 0.5 : 0);
+  }, 0); }
+  var beforeHeight = textHeight(beforeLines), afterHeight = textHeight(afterLines);
+  var left = margins.left * PX_PER_INCH, right = margins.right * PX_PER_INCH;
+  var top = margins.top * PX_PER_INCH, bottom = margins.bottom * PX_PER_INCH;
+  var gap = exportDiagramGapInches() * PX_PER_INCH;
+  var diagramTop = top + beforeHeight + (beforeLines.length ? gap : 0);
+  return {
+    bounds: bounds, margins: margins, beforeLines: beforeLines, afterLines: afterLines, contentWidth: contentWidth,
+    left: left, top: top, right: right, bottom: bottom, gap: gap,
+    width: left + contentWidth + right,
+    diagramTop: diagramTop,
+    diagramHeight: diagramTop + bounds.height,
+    height: diagramTop + bounds.height + gap + afterHeight + bottom,
+    scale: scale, beforeText: String(beforeText || ""), afterText: String(afterText || "")
+  };
+}
+
+function drawFlowText(ctx, options, lines, y) {
+  ctx.fillStyle = "black";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.font = styleFontCSS(16);
+  lines.forEach(function (line, index) {
+    if (index && lines[index - 1].paragraphEnd) y += line.lineHeight * 0.5;
+    ctx.fillText(line.text, options.left, y);
+    y += line.lineHeight;
+  });
+}
+
+function renderFlowPNG(options) {
+  var out = document.createElement("canvas");
+  out.width = Math.max(1, Math.ceil(options.width * options.scale));
+  out.height = Math.max(1, Math.ceil(options.height * options.scale));
+  var ctx = out.getContext("2d");
+  ctx.scale(options.scale, options.scale);
+  ctx.translate(options.left - options.bounds.x, options.diagramTop - options.bounds.y);
+  var wasLocked = constrainToMargins, oldSelected = selectedObject;
+  constrainToMargins = false; selectedObject = null;
+  try { drawUsing(ctx, EXPORT_COLORS, true, true); }
+  finally { constrainToMargins = wasLocked; selectedObject = oldSelected; }
+  ctx.setTransform(options.scale, 0, 0, options.scale, 0, 0);
+  drawFlowText(ctx, options, options.beforeLines, options.top + 16);
+  drawFlowText(ctx, options, options.afterLines, options.diagramHeight + options.gap + 16);
+  return out;
 }
 
 function draw() {
@@ -859,6 +958,20 @@ function saveAsPNG() {
   selectedObject = null;
   var exportScale = (typeof selectedExportPpi === "function" ? selectedExportPpi() : 96) / 96;
   var ok = true;
+  if (exportFlow()) {
+    var flowCanvas = renderFlowPNG(flowExportOptions(exportBeforeText(), exportFollowingText(), exportScale * 96));
+    selectedObject = oldSelectedObject;
+    draw();
+    var flowOk = !shouldDownload || downloadDataURL(activeFSMFileName("png"), flowCanvas.toDataURL("image/png"));
+    if (shouldCopy) copyPNGCanvasToClipboard(flowCanvas).then(function (copied) {
+      if (shouldDownload && flowOk && copied) showToast("Fit-content PNG downloaded and copied");
+      else if (shouldDownload && flowOk) showToast("Fit-content PNG downloaded; clipboard copy unavailable");
+      else if (copied) showToast("Fit-content PNG copied");
+      else showToast("Could not copy PNG image", "error");
+    });
+    else if (flowOk) showToast("Fit-content PNG downloaded"); else showToast("Could not download PNG", "error");
+    return;
+  }
   if (!exportPaged()) {
     var fullCanvas = document.createElement("canvas");
     fullCanvas.width = Math.round(pageWidthPx() * exportScale); fullCanvas.height = Math.round(pageHeightPx() * pageCount * exportScale);
@@ -915,6 +1028,19 @@ function saveAsSVG() {
   constrainToMargins = wasLocked;
   selectedObject = oldSelectedObject;
   var svgPaged = exportPaged();
+  if (exportFlow()) {
+    var fitOptions = flowExportOptions(exportBeforeText(), exportFollowingText(), 96);
+    firstSvg = exporter.toSVG(pageCount, pageMarginsForExport(), false, false, null, fitOptions);
+    var fitOk = !shouldDownload || downloadBlob(activeFSMFileName("svg"), firstSvg, "image/svg+xml;charset=utf-8");
+    Promise.resolve(shouldCopy ? copyToClipboard(firstSvg) : false).then(function (copied) {
+      if (shouldDownload && fitOk && shouldCopy && copied) showToast("Fit-content SVG downloaded and copied");
+      else if (shouldDownload && fitOk) showToast("Fit-content SVG downloaded");
+      else if (shouldDownload) showToast("Could not download SVG", "error");
+      else if (copied) showToast("Fit-content SVG copied");
+      else showToast("Could not copy SVG source", "error");
+    });
+    return;
+  }
   var ok = true;
   var firstSvg = "";
   if (svgPaged) {
@@ -947,7 +1073,8 @@ function saveAsLaTeX() {
   drawUsing(exporter, EXPORT_COLORS);
   constrainToMargins = wasLocked;
   selectedObject = oldSelectedObject;
-  var texData = exporter.toLaTeX(snapshotJSON(), exportStandalone(), pageCount, pageMarginsForExport(), constrainToMargins, exportPaged());
+  var texFlowOptions = exportFlow() ? flowExportOptions(exportBeforeText(), exportFollowingText(), 96) : null;
+  var texData = exporter.toLaTeX(snapshotJSON(), exportStandalone(), pageCount, pageMarginsForExport(), constrainToMargins, exportFlow() ? "flow" : exportPaged(), exportFollowingText(), texFlowOptions, exportBeforeText());
   var downloaded = !shouldDownload || downloadBlob(activeFSMFileName("tex"), texData, "text/plain;charset=utf-8");
   Promise.resolve(shouldCopy ? copyToClipboard(texData) : false).then(function (copied) {
     if (shouldDownload && downloaded && shouldCopy && copied) showToast("LaTeX downloaded and copied");
@@ -971,7 +1098,8 @@ function saveAsTypst() {
   selectedObject = oldSelectedObject;
   var json = snapshotJSON();
   if (typeof json !== "string") json = JSON.stringify(json);
-  var typData = exporter.toTypst(json, exportStandalone(), pageCount, pageMarginsForExport(), constrainToMargins, exportPaged());
+  var typFlowOptions = exportFlow() ? flowExportOptions(exportBeforeText(), exportFollowingText(), 96) : null;
+  var typData = exporter.toTypst(json, exportStandalone(), pageCount, pageMarginsForExport(), constrainToMargins, exportFlow() ? "flow" : exportPaged(), exportFollowingText(), typFlowOptions, exportBeforeText());
   var downloaded = !shouldDownload || downloadBlob(activeFSMFileName("typ"), typData, "text/plain;charset=utf-8");
   Promise.resolve(shouldCopy ? copyToClipboard(typData) : false).then(function (copied) {
     if (shouldDownload && downloaded && shouldCopy && copied) showToast("Typst downloaded and copied");

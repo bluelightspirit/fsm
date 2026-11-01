@@ -48,6 +48,13 @@ function labelToTypstMath(text) {
   return out;
 }
 
+function flowTextTypst(text) {
+  return String(text || "").trim().split(/\n\s*\n/).filter(Boolean).map(function (paragraph) {
+    var escaped = paragraph.replace(/\s*\n\s*/g, " ").replace(/[\\"]/g, "\\$&");
+    return '#text("' + escaped + '")';
+  }).join("\n\n");
+}
+
 function ExportAsTypst() {
   this._points = [];
   this._quadratic = null;
@@ -74,7 +81,7 @@ function ExportAsTypst() {
 
   // json: optional snapshot string, embedded as a comment so the diagram
   // can be restored later from the .typ file itself.
-  this.toTypst = function (json, standalone, pages, margins, constrainMargins, pageMode) {
+  this.toTypst = function (json, standalone, pages, margins, constrainMargins, pageMode, followingText, flowOptions, precedingText) {
     var header = json
       ? "// fsm-data: " + String(json).replace(/[\r\n]+/g, " ") + "\n"
       : "";
@@ -83,12 +90,77 @@ function ExportAsTypst() {
     var pageSize = PAGE_SIZES[pageSizeKey], pw = pageSize.w, ph = pageSize.h;
     var pwCm = pw * 2.54, phCm = ph * 2.54;
     var out = header + '#import "@preview/cetz:0.4.2"\n';
+    if (pageMode === "flow") {
+      if (flowOptions) {
+        var outerWidth = (flowOptions.width / 96).toFixed(4);
+        var innerWidth = (flowOptions.contentWidth / 96).toFixed(4);
+        var leftMargin = (flowOptions.left / 96).toFixed(4);
+        var rightMargin = (flowOptions.right / 96).toFixed(4);
+        var topMargin = (flowOptions.top / 96).toFixed(4);
+        var gap = (flowOptions.gap / 96).toFixed(4);
+        var fontName = typeof styleFontName === "string" ? styleFontName : "Times New Roman";
+        var pageHeightPt = (pageSize.h * 72).toFixed(3);
+        out += "#let fsmFlowDiagram = cetz.canvas({\n  import cetz.draw: *\n" + this._data.replace(/\n/g, "\n  ") + "})\n";
+        var beforeBody = flowTextTypst(precedingText), textBody = flowTextTypst(followingText);
+        var beforeGapExpr = beforeBody ? gap + 'in' : '0pt';
+        var anchorAdjustmentExpr = beforeBody ? '0.20in' : '0pt';
+        function typstTextBlock(body, width) {
+          return body ? '#block(width: ' + width + ')[#pad(left: ' + leftMargin + 'in, right: ' + rightMargin + 'in)[#text(font: ' + JSON.stringify(fontName) + ', size: 12pt)[' + body + ']]]\n' : '';
+        }
+        if (standalone) {
+          out += '#set page(width: ' + outerWidth + 'in, height: auto, margin: 0pt)\n';
+          out += '#set text(font: ' + JSON.stringify(fontName) + ', size: 12pt)\n';
+          out += '#v(' + topMargin + 'in)\n' + typstTextBlock(beforeBody, outerWidth + 'in');
+          if (beforeBody) out += '#v(' + gap + 'in)\n';
+          out += '#block(width: ' + outerWidth + 'in)[#pad(left: ' + leftMargin + 'in, right: ' + rightMargin + 'in)[\n';
+          out += '  #layout(size => {\n    let fit = calc.min(1.0, size.width / measure(fsmFlowDiagram).width) * 100%\n    scale(x: fit, y: fit, reflow: false)[#fsmFlowDiagram]\n  })\n]]\n';
+          out += '#v(' + gap + 'in)\n' + typstTextBlock(textBody, outerWidth + 'in');
+          out += '#block(height: ' + (flowOptions.bottom / 96).toFixed(4) + 'in)[]\n';
+        } else {
+          out += '// Embed in a host document using the selected page size and margins (bottom margin ' + margins.bottom + 'in).\n';
+          out += typstTextBlock(beforeBody, '100%');
+          if (beforeBody) out += '#v(' + gap + 'in)\n';
+          // `layout` by itself receives the page's full content height. Use the
+          // current location to measure the actual remaining page height instead.
+          // The exported paper size/margins provide a stable fallback for hosts
+          // that use the matching page setup documented in the snippet.
+          out += '#context {\n';
+          out += '  let diagramSize = measure(fsmFlowDiagram)\n';
+          out += '  let availableWidth = ' + (flowOptions.contentWidth / 96).toFixed(4) + 'in\n';
+          out += '  let byWidth = calc.min(1.0, availableWidth / diagramSize.width)\n';
+          out += '  let y = here().position().y\n';
+          out += '  let beforeHeight = ' + (beforeBody ? 'measure(block(width: availableWidth)[#text(font: ' + JSON.stringify(fontName) + ', size: 12pt)[' + beforeBody + ']]).height' : '0pt') + '\n';
+          out += '  let afterHeight = ' + (textBody ? 'measure(block(width: availableWidth)[#text(font: ' + JSON.stringify(fontName) + ', size: 12pt)[' + textBody + ']]).height' : '0pt') + '\n';
+          out += '  let anchorAdjustment = ' + anchorAdjustmentExpr + '\n';
+          out += '  let availableHeight = calc.max(1pt, ' + pageHeightPt + 'pt - y - beforeHeight - ' + beforeGapExpr + ' - anchorAdjustment - ' + (flowOptions.bottom / 96).toFixed(4) + 'in - ' + gap + 'in - afterHeight)\n';
+          out += '  let byHeight = availableHeight / diagramSize.height\n';
+          out += '  let fit = calc.min(byWidth, byHeight)\n';
+          // Place the scaled drawing as an overlay, then reserve only its fitted
+          // height in normal flow. This lets Typst keep it on the current page.
+          out += '  let fittedHeight = diagramSize.height * fit\n';
+          out += '  place(top + left, dx: ' + leftMargin + 'in, dy: beforeHeight + ' + beforeGapExpr + ' + anchorAdjustment)[#scale(x: fit * 100%, y: fit * 100%)[#fsmFlowDiagram]] + v(fittedHeight)\n}\n';
+          out += '#v(' + gap + 'in)\n' + typstTextBlock(textBody, '100%');
+        }
+        return out;
+      }
+      var flowPaper = pageSizeKey === "a4" ? "a4" : "us-letter";
+      if (standalone) {
+        out += '#set page(paper: "' + flowPaper + '", margin: (top: ' + margins.top + 'in, bottom: ' + margins.bottom + 'in, left: ' + margins.left + 'in, right: ' + margins.right + 'in))\n';
+      } else {
+        out += "// Host page margins: top " + margins.top + "in, bottom " + margins.bottom + "in, left " + margins.left + "in, right " + margins.right + "in.\n";
+      }
+      out += "#let fsmFlowDiagram = cetz.canvas({\n  import cetz.draw: *\n" + this._data.replace(/\n/g, "\n  ") + "})\n";
+      out += "#layout(size => {\n  let fit = calc.min(1.0, size.width / measure(fsmFlowDiagram).width) * 100%\n  scale(x: fit, y: fit, reflow: true)[#fsmFlowDiagram]\n})\n\n";
+      out += flowTextTypst(followingText);
+      return out + "\n";
+    }
     var pagedMode = pageMode !== false;
     var totalHeight = ph * pages;
     var paperName = pageSizeKey === "a4" ? "a4" : "us-letter";
-    out += pagedMode
+    var pageSetup = pagedMode
       ? "#set page(paper: \"" + paperName + "\", margin: (top: " + margins.top + "in, bottom: " + margins.bottom + "in, left: " + margins.left + "in, right: " + margins.right + "in))\n"
       : "#set page(width: " + pw.toFixed(4) + "in, height: " + totalHeight.toFixed(4) + "in, margin: 0pt)\n";
+    out += standalone ? pageSetup : "// Host document page setup: " + pageSetup.replace(/\n/g, " ") + "\n";
     if (!pagedMode) {
       out += "#place(top + left)[\n  #box(width: " + pw.toFixed(4) + "in, height: " + totalHeight.toFixed(4) + "in, clip: true)[\n";
       out += "    #cetz.canvas({\n      import cetz.draw: *\n";

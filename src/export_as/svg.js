@@ -28,7 +28,7 @@ function ExportAsSVG() {
     this._svgData += '<circle cx="' + fixed(x, 3) + '" cy="' + fixed(y, 3) + '" r="' + fixed(r, 2) + '" fill="white" stroke="black" stroke-width="2"/>\n';
   };
 
-  this.toSVG = function (pages, margins, constrainMargins, pageMode, pageIndex) {
+  this.toSVG = function (pages, margins, constrainMargins, pageMode, pageIndex, contentOptions) {
     pages = pages || 1;
     margins = margins || { top: 1, bottom: 1, left: 1, right: 1 };
     var fallbackW = (typeof canvas !== "undefined" && canvas.width) || 800;
@@ -36,6 +36,33 @@ function ExportAsSVG() {
     var pageH = typeof pageHeightPx === "function" ? pageHeightPx() : fallbackH;
     var pageW = typeof pageWidthPx === "function" ? pageWidthPx() : fallbackW;
     var paged = pageMode !== false;
+    if (contentOptions) {
+      var cw = contentOptions.width, ch = contentOptions.height;
+      var shiftX = contentOptions.left - contentOptions.bounds.x;
+      var shiftY = contentOptions.diagramTop - contentOptions.bounds.y;
+      var bodyFit = '';
+      var fontFamily = typeof styleFontName === "string" ? styleFontName : "serif";
+      function xml(value) { return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;"); }
+      var beforeY = contentOptions.top + 16;
+      bodyFit += '<g fill="black" font-family="' + xml(fontFamily) + '" font-size="16">\n';
+      contentOptions.beforeLines.forEach(function (line, index) {
+        if (index && contentOptions.beforeLines[index - 1].paragraphEnd) beforeY += line.lineHeight * 0.5;
+        bodyFit += '<text x="' + fixed(contentOptions.left, 3) + '" y="' + fixed(beforeY, 3) + '">' + xml(line.text) + '</text>\n';
+        beforeY += line.lineHeight;
+      });
+      bodyFit += '</g>\n';
+      bodyFit += '<g transform="translate(' + fixed(shiftX, 3) + ' ' + fixed(shiftY, 3) + ')">\n' + this._svgData + '</g>\n';
+      var textY = contentOptions.diagramHeight + contentOptions.gap + 16;
+      bodyFit += '<g fill="black" font-family="' + xml(fontFamily) + '" font-size="16">\n';
+      contentOptions.afterLines.forEach(function (line, index) {
+        if (index && contentOptions.afterLines[index - 1].paragraphEnd) textY += line.lineHeight * 0.5;
+        bodyFit += '<text x="' + fixed(contentOptions.left, 3) + '" y="' + fixed(textY, 3) + '">' + xml(line.text) + '</text>\n';
+        textY += line.lineHeight;
+      });
+      bodyFit += '</g>\n';
+      return '<?xml version="1.0" standalone="no"?>\n' +
+        '<svg width="' + fixed(cw, 3) + '" height="' + fixed(ch, 3) + '" viewBox="0 0 ' + fixed(cw, 3) + ' ' + fixed(ch, 3) + '" version="1.1" xmlns="http://www.w3.org/2000/svg">\n' + bodyFit + '</svg>\n';
+    }
     var top = paged ? (pageIndex || 0) * pageH : 0;
     var outW = paged ? pageW : pageW;
     var outH = paged ? pageH : pageH * pages;

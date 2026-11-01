@@ -784,12 +784,85 @@ function ExportAsLaTeX() {
 
   // json: optional snapshot string, embedded as a comment so the diagram can be restored later.
   // standalone: full document (cropped to the diagram) vs. just the tikzpicture to paste.
-  this.toLaTeX = function (json, standalone, pages, margins, constrainMargins, pageMode) {
+  function escapePlainText(text) {
+    var replacements = { "\\": "\\textbackslash{}", "{": "\\{", "}": "\\}", "$": "\\$", "&": "\\&", "#": "\\#", "%": "\\%", "_": "\\_", "^": "\\textasciicircum{}", "~": "\\textasciitilde{}" };
+    return String(text || "").replace(/[\\{}$&#%_^~]/g, function (ch) { return replacements[ch]; });
+  }
+  function flowTextLatex(text) {
+    return String(text || "").trim().split(/\n\s*\n/).filter(Boolean).map(function (paragraph) {
+      return "\\noindent " + escapePlainText(paragraph.replace(/\s*\n\s*/g, " "));
+    }).join("\n\\par\n");
+  }
+  this.toLaTeX = function (json, standalone, pages, margins, constrainMargins, pageMode, followingText, flowOptions, precedingText) {
     var data = json ? "% fsm-data: " + String(json).replace(/[\r\n]+/g, " ") + "\n" : "";
     pages = Math.max(1, Math.min(20, Math.round(pages || 1)));
     margins = margins || { top: 1, bottom: 1, left: 1, right: 1 };
     var paged = "";
     var pageSize = PAGE_SIZES[pageSizeKey];
+    if (pageMode === "flow") {
+      if (flowOptions) {
+        var cmPerPx = 2.54 / 96;
+        var texDrawing = this._texData;
+        var pictureHeight = flowOptions.bounds.height;
+        var shiftX = flowOptions.left - flowOptions.bounds.x;
+        function pictureCode(height, yShift) {
+          return "\\begin{tikzpicture}[x=0.264583cm,y=0.264583cm]\n" +
+            "\\path[use as bounding box] (0,0) rectangle (" + (flowOptions.width / 10).toFixed(4) + "," + (-height / 10).toFixed(4) + ");\n" +
+            "\\clip (0,0) rectangle (" + (flowOptions.width / 10).toFixed(4) + "," + (-height / 10).toFixed(4) + ");\n" +
+            "\\begin{scope}[shift={(" + (shiftX * cmPerPx).toFixed(4) + "cm," + (yShift * cmPerPx).toFixed(4) + "cm)}]\n" +
+            "\\tikzstyle{every node}+=[inner sep=0pt]\n" + texDrawing + "\\end{scope}\n\\end{tikzpicture}\n";
+        }
+        var flowPicture = pictureCode(pictureHeight, flowOptions.bounds.y);
+        var embeddedPicture = pictureCode(flowOptions.top + pictureHeight, flowOptions.bounds.y - flowOptions.top);
+        var beforeBody = flowTextLatex(precedingText), textBody = flowTextLatex(followingText);
+        function paragraphBlock(body, width) {
+          return body ? "\\noindent\\hspace*{" + (flowOptions.left / 96).toFixed(4) + "in}\\begin{minipage}{" + width + "}\n\\fontsize{12}{18}\\selectfont\n" + body + "\\end{minipage}\\par\n" : "";
+        }
+        var flowBody = "\\vspace*{" + (flowOptions.top / 96).toFixed(4) + "in}\n";
+        flowBody += paragraphBlock(beforeBody, (flowOptions.contentWidth / 96).toFixed(4) + "in");
+        if (beforeBody) flowBody += "\\vspace*{" + (flowOptions.gap / 96).toFixed(4) + "in}\n";
+        flowBody += "\\noindent " + flowPicture + "\\par\n";
+        flowBody += "\\vspace*{" + (flowOptions.gap / 96).toFixed(4) + "in}\n";
+        flowBody += paragraphBlock(textBody, (flowOptions.contentWidth / 96).toFixed(4) + "in");
+        flowBody += "\\noindent\\rule{0pt}{" + (flowOptions.bottom / 96).toFixed(4) + "in}\\par\n";
+        if (!standalone) {
+          var embeddedBody = "\\par\n" + beforeBody + (beforeBody ? "\\par\\vspace*{" + (flowOptions.gap / 96).toFixed(4) + "in}\n" : "");
+          embeddedBody += "\\begingroup\n\\sbox0{" + embeddedPicture + "}\n\\sbox1{\\copy0}\n";
+          embeddedBody += "\\ifdim\\wd1>\\linewidth \\sbox1{\\resizebox{\\linewidth}{!}{\\copy0}}\\fi\n";
+          embeddedBody += "\\dimen0=\\dimexpr\\pagegoal-\\pagetotal-" + (flowOptions.gap / 96).toFixed(4) + "in" + (textBody ? "-\\baselineskip" : "") + "\\relax\n";
+          embeddedBody += "\\ifdim\\dimen0<1pt \\dimen0=1pt \\fi\n";
+          embeddedBody += "\\ifdim\\dimexpr\\ht1+\\dp1\\relax>\\dimen0 \\sbox1{\\resizebox{!}{\\dimen0}{\\copy1}}\\fi\n";
+          embeddedBody += "\\noindent\\usebox1\\par\n\\endgroup\n\\vspace*{" + (flowOptions.gap / 96).toFixed(4) + "in}\n" + textBody + "\\par\n";
+          return data + "% Requires \\usepackage{tikz,graphicx} in the host document.\n" +
+            "% Fit calculation assumes the selected paper size and bottom margin " + (flowOptions.bottom / 96).toFixed(4) + "in.\n" + embeddedBody;
+        }
+        return data +
+          "\\documentclass{article}\n\\usepackage[paperwidth=" + (flowOptions.width / 96).toFixed(4) + "in,paperheight=" + (flowOptions.height / 96).toFixed(4) + "in,margin=0pt]{geometry}\n\\usepackage{tikz}\n\\pagestyle{empty}\n\\setlength{\\parindent}{0pt}\n\\setlength{\\topskip}{0pt}\n\\setlength{\\parskip}{0pt}\n\\begin{document}\n" +
+          "\\begin{minipage}{" + (flowOptions.width / 96).toFixed(4) + "in}\n" + flowBody + "\\end{minipage}\n\\end{document}\n";
+      }
+      var flowPicture =
+        "\\begingroup\n" +
+        "\\sbox0{\\begin{tikzpicture}[x=0.264583cm,y=0.264583cm]\n" +
+        "\\tikzstyle{every node}+=[inner sep=0pt]\n" + this._texData +
+        "\\end{tikzpicture}}\n" +
+        "\\sbox1{\\resizebox{\\linewidth}{!}{\\copy0}}\n" +
+        "\\sbox2{\\resizebox{!}{\\textheight}{\\copy0}}\n" +
+        "\\ifdim\\wd0>\\linewidth\n" +
+        "  \\ifdim\\dimexpr\\ht1+\\dp1\\relax>\\textheight \\copy2 \\else \\copy1 \\fi\n" +
+        "\\else\n" +
+        "  \\ifdim\\dimexpr\\ht0+\\dp0\\relax>\\textheight \\copy2 \\else \\copy0 \\fi\n" +
+        "\\fi\n\\endgroup\n\\par\\medskip\n";
+      var flowBody = flowPicture + flowTextLatex(followingText) + "\n";
+      if (!standalone) return data +
+        "% Requires \\usepackage{tikz,graphicx} in the host document.\n" +
+        "% Set the host page margins to top=" + margins.top + "in, bottom=" + margins.bottom + "in, left=" + margins.left + "in, right=" + margins.right + "in.\n" +
+        flowBody;
+      return data +
+        "\\documentclass{article}\n" +
+        "\\usepackage[paperwidth=" + pageSize.w + "in,paperheight=" + pageSize.h + "in,top=" + margins.top + "in,bottom=" + margins.bottom + "in,left=" + margins.left + "in,right=" + margins.right + "in]{geometry}\n" +
+        "\\usepackage{tikz}\n\\usepackage{graphicx}\n" +
+        "\\setlength{\\parindent}{0pt}\n\\begin{document}\n" + flowBody + "\\end{document}\n";
+    }
     var width = pageSize.w * 9.6, height = pageSize.h * 9.6;
     var outputPages = pageMode === false ? 1 : pages;
     var trimW = standalone ? width * PAGE_TRIM_RATIO_W : 0;
@@ -1019,7 +1092,7 @@ function ExportAsSVG() {
     this._svgData += '<circle cx="' + fixed(x, 3) + '" cy="' + fixed(y, 3) + '" r="' + fixed(r, 2) + '" fill="white" stroke="black" stroke-width="2"/>\n';
   };
 
-  this.toSVG = function (pages, margins, constrainMargins, pageMode, pageIndex) {
+  this.toSVG = function (pages, margins, constrainMargins, pageMode, pageIndex, contentOptions) {
     pages = pages || 1;
     margins = margins || { top: 1, bottom: 1, left: 1, right: 1 };
     var fallbackW = (typeof canvas !== "undefined" && canvas.width) || 800;
@@ -1027,6 +1100,33 @@ function ExportAsSVG() {
     var pageH = typeof pageHeightPx === "function" ? pageHeightPx() : fallbackH;
     var pageW = typeof pageWidthPx === "function" ? pageWidthPx() : fallbackW;
     var paged = pageMode !== false;
+    if (contentOptions) {
+      var cw = contentOptions.width, ch = contentOptions.height;
+      var shiftX = contentOptions.left - contentOptions.bounds.x;
+      var shiftY = contentOptions.diagramTop - contentOptions.bounds.y;
+      var bodyFit = '';
+      var fontFamily = typeof styleFontName === "string" ? styleFontName : "serif";
+      function xml(value) { return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;"); }
+      var beforeY = contentOptions.top + 16;
+      bodyFit += '<g fill="black" font-family="' + xml(fontFamily) + '" font-size="16">\n';
+      contentOptions.beforeLines.forEach(function (line, index) {
+        if (index && contentOptions.beforeLines[index - 1].paragraphEnd) beforeY += line.lineHeight * 0.5;
+        bodyFit += '<text x="' + fixed(contentOptions.left, 3) + '" y="' + fixed(beforeY, 3) + '">' + xml(line.text) + '</text>\n';
+        beforeY += line.lineHeight;
+      });
+      bodyFit += '</g>\n';
+      bodyFit += '<g transform="translate(' + fixed(shiftX, 3) + ' ' + fixed(shiftY, 3) + ')">\n' + this._svgData + '</g>\n';
+      var textY = contentOptions.diagramHeight + contentOptions.gap + 16;
+      bodyFit += '<g fill="black" font-family="' + xml(fontFamily) + '" font-size="16">\n';
+      contentOptions.afterLines.forEach(function (line, index) {
+        if (index && contentOptions.afterLines[index - 1].paragraphEnd) textY += line.lineHeight * 0.5;
+        bodyFit += '<text x="' + fixed(contentOptions.left, 3) + '" y="' + fixed(textY, 3) + '">' + xml(line.text) + '</text>\n';
+        textY += line.lineHeight;
+      });
+      bodyFit += '</g>\n';
+      return '<?xml version="1.0" standalone="no"?>\n' +
+        '<svg width="' + fixed(cw, 3) + '" height="' + fixed(ch, 3) + '" viewBox="0 0 ' + fixed(cw, 3) + ' ' + fixed(ch, 3) + '" version="1.1" xmlns="http://www.w3.org/2000/svg">\n' + bodyFit + '</svg>\n';
+    }
     var top = paged ? (pageIndex || 0) * pageH : 0;
     var outW = paged ? pageW : pageW;
     var outH = paged ? pageH : pageH * pages;
@@ -1193,6 +1293,13 @@ function labelToTypstMath(text) {
   return out;
 }
 
+function flowTextTypst(text) {
+  return String(text || "").trim().split(/\n\s*\n/).filter(Boolean).map(function (paragraph) {
+    var escaped = paragraph.replace(/\s*\n\s*/g, " ").replace(/[\\"]/g, "\\$&");
+    return '#text("' + escaped + '")';
+  }).join("\n\n");
+}
+
 function ExportAsTypst() {
   this._points = [];
   this._quadratic = null;
@@ -1219,7 +1326,7 @@ function ExportAsTypst() {
 
   // json: optional snapshot string, embedded as a comment so the diagram
   // can be restored later from the .typ file itself.
-  this.toTypst = function (json, standalone, pages, margins, constrainMargins, pageMode) {
+  this.toTypst = function (json, standalone, pages, margins, constrainMargins, pageMode, followingText, flowOptions, precedingText) {
     var header = json
       ? "// fsm-data: " + String(json).replace(/[\r\n]+/g, " ") + "\n"
       : "";
@@ -1228,12 +1335,77 @@ function ExportAsTypst() {
     var pageSize = PAGE_SIZES[pageSizeKey], pw = pageSize.w, ph = pageSize.h;
     var pwCm = pw * 2.54, phCm = ph * 2.54;
     var out = header + '#import "@preview/cetz:0.4.2"\n';
+    if (pageMode === "flow") {
+      if (flowOptions) {
+        var outerWidth = (flowOptions.width / 96).toFixed(4);
+        var innerWidth = (flowOptions.contentWidth / 96).toFixed(4);
+        var leftMargin = (flowOptions.left / 96).toFixed(4);
+        var rightMargin = (flowOptions.right / 96).toFixed(4);
+        var topMargin = (flowOptions.top / 96).toFixed(4);
+        var gap = (flowOptions.gap / 96).toFixed(4);
+        var fontName = typeof styleFontName === "string" ? styleFontName : "Times New Roman";
+        var pageHeightPt = (pageSize.h * 72).toFixed(3);
+        out += "#let fsmFlowDiagram = cetz.canvas({\n  import cetz.draw: *\n" + this._data.replace(/\n/g, "\n  ") + "})\n";
+        var beforeBody = flowTextTypst(precedingText), textBody = flowTextTypst(followingText);
+        var beforeGapExpr = beforeBody ? gap + 'in' : '0pt';
+        var anchorAdjustmentExpr = beforeBody ? '0.20in' : '0pt';
+        function typstTextBlock(body, width) {
+          return body ? '#block(width: ' + width + ')[#pad(left: ' + leftMargin + 'in, right: ' + rightMargin + 'in)[#text(font: ' + JSON.stringify(fontName) + ', size: 12pt)[' + body + ']]]\n' : '';
+        }
+        if (standalone) {
+          out += '#set page(width: ' + outerWidth + 'in, height: auto, margin: 0pt)\n';
+          out += '#set text(font: ' + JSON.stringify(fontName) + ', size: 12pt)\n';
+          out += '#v(' + topMargin + 'in)\n' + typstTextBlock(beforeBody, outerWidth + 'in');
+          if (beforeBody) out += '#v(' + gap + 'in)\n';
+          out += '#block(width: ' + outerWidth + 'in)[#pad(left: ' + leftMargin + 'in, right: ' + rightMargin + 'in)[\n';
+          out += '  #layout(size => {\n    let fit = calc.min(1.0, size.width / measure(fsmFlowDiagram).width) * 100%\n    scale(x: fit, y: fit, reflow: false)[#fsmFlowDiagram]\n  })\n]]\n';
+          out += '#v(' + gap + 'in)\n' + typstTextBlock(textBody, outerWidth + 'in');
+          out += '#block(height: ' + (flowOptions.bottom / 96).toFixed(4) + 'in)[]\n';
+        } else {
+          out += '// Embed in a host document using the selected page size and margins (bottom margin ' + margins.bottom + 'in).\n';
+          out += typstTextBlock(beforeBody, '100%');
+          if (beforeBody) out += '#v(' + gap + 'in)\n';
+          // `layout` by itself receives the page's full content height. Use the
+          // current location to measure the actual remaining page height instead.
+          // The exported paper size/margins provide a stable fallback for hosts
+          // that use the matching page setup documented in the snippet.
+          out += '#context {\n';
+          out += '  let diagramSize = measure(fsmFlowDiagram)\n';
+          out += '  let availableWidth = ' + (flowOptions.contentWidth / 96).toFixed(4) + 'in\n';
+          out += '  let byWidth = calc.min(1.0, availableWidth / diagramSize.width)\n';
+          out += '  let y = here().position().y\n';
+          out += '  let beforeHeight = ' + (beforeBody ? 'measure(block(width: availableWidth)[#text(font: ' + JSON.stringify(fontName) + ', size: 12pt)[' + beforeBody + ']]).height' : '0pt') + '\n';
+          out += '  let afterHeight = ' + (textBody ? 'measure(block(width: availableWidth)[#text(font: ' + JSON.stringify(fontName) + ', size: 12pt)[' + textBody + ']]).height' : '0pt') + '\n';
+          out += '  let anchorAdjustment = ' + anchorAdjustmentExpr + '\n';
+          out += '  let availableHeight = calc.max(1pt, ' + pageHeightPt + 'pt - y - beforeHeight - ' + beforeGapExpr + ' - anchorAdjustment - ' + (flowOptions.bottom / 96).toFixed(4) + 'in - ' + gap + 'in - afterHeight)\n';
+          out += '  let byHeight = availableHeight / diagramSize.height\n';
+          out += '  let fit = calc.min(byWidth, byHeight)\n';
+          // Place the scaled drawing as an overlay, then reserve only its fitted
+          // height in normal flow. This lets Typst keep it on the current page.
+          out += '  let fittedHeight = diagramSize.height * fit\n';
+          out += '  place(top + left, dx: ' + leftMargin + 'in, dy: beforeHeight + ' + beforeGapExpr + ' + anchorAdjustment)[#scale(x: fit * 100%, y: fit * 100%)[#fsmFlowDiagram]] + v(fittedHeight)\n}\n';
+          out += '#v(' + gap + 'in)\n' + typstTextBlock(textBody, '100%');
+        }
+        return out;
+      }
+      var flowPaper = pageSizeKey === "a4" ? "a4" : "us-letter";
+      if (standalone) {
+        out += '#set page(paper: "' + flowPaper + '", margin: (top: ' + margins.top + 'in, bottom: ' + margins.bottom + 'in, left: ' + margins.left + 'in, right: ' + margins.right + 'in))\n';
+      } else {
+        out += "// Host page margins: top " + margins.top + "in, bottom " + margins.bottom + "in, left " + margins.left + "in, right " + margins.right + "in.\n";
+      }
+      out += "#let fsmFlowDiagram = cetz.canvas({\n  import cetz.draw: *\n" + this._data.replace(/\n/g, "\n  ") + "})\n";
+      out += "#layout(size => {\n  let fit = calc.min(1.0, size.width / measure(fsmFlowDiagram).width) * 100%\n  scale(x: fit, y: fit, reflow: true)[#fsmFlowDiagram]\n})\n\n";
+      out += flowTextTypst(followingText);
+      return out + "\n";
+    }
     var pagedMode = pageMode !== false;
     var totalHeight = ph * pages;
     var paperName = pageSizeKey === "a4" ? "a4" : "us-letter";
-    out += pagedMode
+    var pageSetup = pagedMode
       ? "#set page(paper: \"" + paperName + "\", margin: (top: " + margins.top + "in, bottom: " + margins.bottom + "in, left: " + margins.left + "in, right: " + margins.right + "in))\n"
       : "#set page(width: " + pw.toFixed(4) + "in, height: " + totalHeight.toFixed(4) + "in, margin: 0pt)\n";
+    out += standalone ? pageSetup : "// Host document page setup: " + pageSetup.replace(/\n/g, " ") + "\n";
     if (!pagedMode) {
       out += "#place(top + left)[\n  #box(width: " + pw.toFixed(4) + "in, height: " + totalHeight.toFixed(4) + "in, clip: true)[\n";
       out += "    #cetz.canvas({\n      import cetz.draw: *\n";
@@ -2412,11 +2584,23 @@ var EXPORT_STANDALONE_KEY = "fsm-export-standalone";
 var EXPORT_LAYOUT_KEY = "fsm-export-layout";
 var EXPORT_COPY_KEY = "fsm-export-copy";
 var EXPORT_DOWNLOAD_KEY = "fsm-export-download";
+var EXPORT_FLOW_TEXT_KEY = "fsm-export-flow-text";
+var EXPORT_FLOW_BEFORE_TEXT_KEY = "fsm-export-before-text";
+var EXPORT_DIAGRAM_GAP_KEY = "fsm-export-diagram-gap-inches";
 var exportLayoutMode = "paged";
 var exportPpi = 300;
+var exportFlowText = "";
+var exportFlowBeforeText = "";
+var exportDiagramGap = 0.25;
 function selectedExportPpi() { return exportPpi; }
 
 function exportPaged() { return exportLayoutMode === "paged"; }
+function exportFollowingText() { var el = document.getElementById("export-flow-text"); return el ? el.value : exportFlowText; }
+function exportBeforeText() { var el = document.getElementById("export-flow-before-text"); return el ? el.value : exportFlowBeforeText; }
+// Entering continuation text opts LaTeX and Typst into flowing layout directly,
+// so users do not have to find or change the layout selector first.
+function exportFlow() { return exportLayoutMode === "flow" || !!String(exportFollowingText() || "").trim() || !!String(exportBeforeText() || "").trim(); }
+function exportDiagramGapInches() { return exportDiagramGap; }
 function exportCopyEnabled() { var el = document.getElementById("export-copy"); return el ? el.checked : true; }
 function exportDownloadEnabled() { var el = document.getElementById("export-download"); return el ? el.checked : true; }
 
@@ -2501,7 +2685,9 @@ function wireExportOptionsUI() {
   });
   var label = document.createElement("label");
   label.style.cssText = "display:inline-flex;align-items:center;gap:6px;cursor:pointer;";
-  label.title = "Controls whether LaTeX includes its document preamble. Export layout is selected separately; Typst always includes the page size needed to match the editor.";
+  label.title = exportFlow()
+    ? "Checked: export a complete LaTeX or Typst document. Unchecked: export source to insert into an existing document."
+    : "Controls whether LaTeX includes its document preamble.";
   var box = document.createElement("input");
   box.type = "checkbox";
   box.id = "export-standalone";
@@ -2516,9 +2702,8 @@ function wireExportOptionsUI() {
     } catch (e) {}
   });
   label.appendChild(box);
-  label.appendChild(
-    document.createTextNode("Standalone LaTeX document"),
-  );
+  var standaloneCaption = document.createTextNode(exportFlow() ? "Full document (LaTeX / Typst)" : "Standalone LaTeX document");
+  label.appendChild(standaloneCaption);
   checksRow.appendChild(label);
 
   var layoutLabel = document.createElement("label");
@@ -2526,18 +2711,108 @@ function wireExportOptionsUI() {
   layoutLabel.appendChild(document.createTextNode("Export layout"));
   var layout = document.createElement("select");
   layout.id = "export-layout";
-  [["paged", "Paper pages (page size and selected margins)"], ["full", "Full diagram (one uncropped tall export)"]].forEach(function (item) {
+  [["paged", "Paper pages (page size and selected margins)"], ["full", "Full diagram (one uncropped tall export)"], ["flow", "Fit to content (FSM + text)"]].forEach(function (item) {
     var option = document.createElement("option"); option.value = item[0]; option.textContent = item[1]; layout.appendChild(option);
   });
   try { exportLayoutMode = localStorage.getItem(EXPORT_LAYOUT_KEY) || "paged"; } catch (e) { exportLayoutMode = "paged"; }
-  if (exportLayoutMode !== "full") exportLayoutMode = "paged";
+  if (["full", "flow"].indexOf(exportLayoutMode) < 0) exportLayoutMode = "paged";
   layout.value = exportLayoutMode;
+  standaloneCaption.nodeValue = exportFlow() ? "Full document (LaTeX / Typst)" : "Standalone LaTeX document";
+  label.title = exportFlow()
+    ? "Checked: export a complete LaTeX or Typst document. Unchecked: export source to insert into an existing document."
+    : "Controls whether LaTeX includes its document preamble.";
   layout.addEventListener("change", function () {
     exportLayoutMode = layout.value;
     try { localStorage.setItem(EXPORT_LAYOUT_KEY, exportLayoutMode); } catch (e) {}
+    flowTextLabel.hidden = false;
+    standaloneCaption.nodeValue = exportFlow() ? "Full document (LaTeX / Typst)" : "Standalone LaTeX document";
+    label.title = exportFlow()
+      ? "Checked: export a complete LaTeX or Typst document. Unchecked: export source to insert into an existing document."
+      : "Controls whether LaTeX includes its document preamble.";
   });
   layoutLabel.appendChild(layout);
   settingsRow.appendChild(layoutLabel);
+
+  var beforeTextLabel = document.createElement("label");
+  beforeTextLabel.style.cssText = "display:flex;flex-direction:column;gap:4px;width:100%;max-width:760px;";
+  beforeTextLabel.appendChild(document.createTextNode("Text before the FSM (optional; plain text, blank lines start paragraphs)"));
+  var beforeText = document.createElement("textarea");
+  beforeText.id = "export-flow-before-text";
+  beforeText.rows = 3;
+  beforeText.placeholder = "For example: We now examine the machine below.";
+  beforeText.style.cssText = "width:100%;resize:vertical;";
+  try { exportFlowBeforeText = localStorage.getItem(EXPORT_FLOW_BEFORE_TEXT_KEY) || ""; } catch (e) { exportFlowBeforeText = ""; }
+  beforeText.value = exportFlowBeforeText;
+  beforeTextLabel.appendChild(beforeText);
+  row.appendChild(beforeTextLabel);
+
+  var flowTextLabel = document.createElement("label");
+  flowTextLabel.id = "export-flow-text-label";
+  flowTextLabel.style.cssText = "display:flex;flex-direction:column;gap:4px;width:100%;max-width:760px;";
+  flowTextLabel.appendChild(document.createTextNode("Text after the FSM (optional; plain text, blank lines start paragraphs)"));
+  var flowText = document.createElement("textarea");
+  flowText.id = "export-flow-text";
+  flowText.rows = 4;
+  flowText.placeholder = "For example: This machine accepts strings whose final three symbols are abb.";
+  flowText.style.cssText = "width:100%;resize:vertical;";
+  try { exportFlowText = localStorage.getItem(EXPORT_FLOW_TEXT_KEY) || ""; } catch (e) { exportFlowText = ""; }
+  flowText.value = exportFlowText;
+  if (exportFlowText.trim() || exportFlowBeforeText.trim()) {
+    exportLayoutMode = "flow";
+    layout.value = "flow";
+    standaloneCaption.nodeValue = "Full document (LaTeX / Typst)";
+    label.title = "Checked: export a complete LaTeX or Typst document. Unchecked: export a source snippet for an existing document.";
+    try { localStorage.setItem(EXPORT_LAYOUT_KEY, "flow"); } catch (e) {}
+  }
+  beforeText.addEventListener("input", function () {
+    exportFlowBeforeText = beforeText.value;
+    try { localStorage.setItem(EXPORT_FLOW_BEFORE_TEXT_KEY, exportFlowBeforeText); } catch (e) {}
+    if (exportFlowBeforeText.trim()) {
+      exportLayoutMode = "flow";
+      layout.value = "flow";
+      standaloneCaption.nodeValue = "Full document (LaTeX / Typst)";
+      label.title = "Checked: export a complete LaTeX or Typst document. Unchecked: export a source snippet for an existing document.";
+      try { localStorage.setItem(EXPORT_LAYOUT_KEY, "flow"); } catch (e) {}
+    }
+  });
+  flowText.addEventListener("input", function () {
+    exportFlowText = flowText.value;
+    try { localStorage.setItem(EXPORT_FLOW_TEXT_KEY, exportFlowText); } catch (e) {}
+    if (exportFlowText.trim()) {
+      exportLayoutMode = "flow";
+      layout.value = "flow";
+      standaloneCaption.nodeValue = "Full document (LaTeX / Typst)";
+      label.title = "Checked: export a complete LaTeX or Typst document. Unchecked: export a source snippet for an existing document.";
+      try { localStorage.setItem(EXPORT_LAYOUT_KEY, "flow"); } catch (e) {}
+    }
+  });
+  flowTextLabel.appendChild(flowText);
+  flowTextLabel.hidden = false;
+  row.appendChild(flowTextLabel);
+
+  var gapLabel = document.createElement("label");
+  gapLabel.style.cssText = "display:inline-flex;align-items:center;gap:6px;";
+  gapLabel.appendChild(document.createTextNode("Gap between FSM and adjacent text (inches; bottom padding if both text boxes are blank)"));
+  var gapInput = document.createElement("input");
+  gapInput.id = "export-diagram-gap";
+  gapInput.type = "number";
+  gapInput.min = "0";
+  gapInput.max = "4";
+  gapInput.step = "0.05";
+  try {
+    var savedGap = localStorage.getItem(EXPORT_DIAGRAM_GAP_KEY);
+    exportDiagramGap = savedGap === null ? 0.25 : Math.max(0, Math.min(4, Number(savedGap) || 0));
+  } catch (e) { exportDiagramGap = 0.25; }
+  gapInput.value = String(exportDiagramGap);
+  gapInput.style.width = "5.5em";
+  gapInput.addEventListener("input", function () {
+    var value = Number(gapInput.value);
+    if (!isFinite(value)) return;
+    exportDiagramGap = Math.max(0, Math.min(4, value));
+    try { localStorage.setItem(EXPORT_DIAGRAM_GAP_KEY, String(exportDiagramGap)); } catch (e) {}
+  });
+  gapLabel.appendChild(gapInput);
+  row.appendChild(gapLabel);
 
   var ppiLabel = document.createElement("label");
   ppiLabel.style.cssText = "display:inline-flex;align-items:center;gap:6px;";
@@ -2770,11 +3045,11 @@ function getDrawColors() {
 
 var EXPORT_COLORS = { fg: "black", selected: "black" };
 
-function drawUsing(c, colors, ignoreMarginClip) {
+function drawUsing(c, colors, ignoreMarginClip, preserveCanvas) {
   colors = colors || getDrawColors();
   var editorContext = c.canvas === canvas && typeof c.scale === "function";
   var ratio = editorContext && typeof editorPixelRatio === "function" ? editorPixelRatio() : 1;
-  c.clearRect(0, 0, canvas.width, canvas.height);
+  if (!preserveCanvas) c.clearRect(0, 0, canvas.width, canvas.height);
   c.save();
   if (editorContext) c.scale(ratio, ratio);
   c.translate(0.5, 0.5);
@@ -2860,6 +3135,105 @@ function drawUsing(c, colors, ignoreMarginClip) {
     if (selectedObject instanceof Link && selectedObject.getEndPointsAndCircle().hasCurve) selectedObject.drawCurveHandles(editorCtx);
     editorCtx.restore();
   }
+}
+
+function flowTextLines(text, width) {
+  if (!String(text || "").trim()) return [];
+  var measure = document.createElement("canvas").getContext("2d");
+  var fontSize = 16, lineHeight = 24;
+  measure.font = styleFontCSS(fontSize);
+  var paragraphs = String(text).trim().split(/\n\s*\n/);
+  var lines = [];
+  paragraphs.forEach(function (paragraph, paragraphIndex) {
+    var words = paragraph.replace(/\s*\n\s*/g, " ").split(/\s+/).filter(Boolean);
+    var line = "";
+    words.forEach(function (word) {
+      var candidate = line ? line + " " + word : word;
+      if (line && measure.measureText(candidate).width > width) {
+        lines.push({ text: line, paragraphEnd: false });
+        line = word;
+      } else line = candidate;
+    });
+    if (line) lines.push({ text: line, paragraphEnd: paragraphIndex < paragraphs.length - 1 });
+  });
+  return lines.map(function (line) { line.fontSize = fontSize; line.lineHeight = lineHeight; return line; });
+}
+
+function measureDiagramInk() {
+  var width = pageWidthPx(), height = pageHeightPx() * pageCount;
+  var probe = document.createElement("canvas");
+  probe.width = width; probe.height = height;
+  var ctx = probe.getContext("2d", { willReadFrequently: true });
+  var wasLocked = constrainToMargins, oldSelected = selectedObject;
+  constrainToMargins = false; selectedObject = null;
+  try { drawUsing(ctx, EXPORT_COLORS, true, true); }
+  finally { constrainToMargins = wasLocked; selectedObject = oldSelected; }
+  var pixels = ctx.getImageData(0, 0, width, height).data;
+  var minX = width, minY = height, maxX = -1, maxY = -1;
+  for (var y = 0; y < height; y++) for (var x = 0; x < width; x++) {
+    if (pixels[(y * width + x) * 4 + 3] !== 0) {
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+    }
+  }
+  if (maxX < minX || maxY < minY) return { x: 0, y: 0, width: 0, height: 0 };
+  minX = Math.max(0, minX - 1); minY = Math.max(0, minY - 1);
+  maxX = Math.min(width - 1, maxX + 1); maxY = Math.min(height - 1, maxY + 1);
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+}
+
+function flowExportOptions(beforeText, afterText, ppi) {
+  var bounds = measureDiagramInk();
+  var margins = pageMarginsForExport();
+  var scale = (ppi || 96) / 96;
+  var contentWidth = bounds.width || Math.max(1, pageWidthPx() - (margins.left + margins.right) * PX_PER_INCH);
+  var beforeLines = flowTextLines(beforeText, contentWidth), afterLines = flowTextLines(afterText, contentWidth);
+  function textHeight(lines) { return lines.reduce(function (sum, line, index) {
+    return sum + line.lineHeight + (index && lines[index - 1].paragraphEnd ? line.lineHeight * 0.5 : 0);
+  }, 0); }
+  var beforeHeight = textHeight(beforeLines), afterHeight = textHeight(afterLines);
+  var left = margins.left * PX_PER_INCH, right = margins.right * PX_PER_INCH;
+  var top = margins.top * PX_PER_INCH, bottom = margins.bottom * PX_PER_INCH;
+  var gap = exportDiagramGapInches() * PX_PER_INCH;
+  var diagramTop = top + beforeHeight + (beforeLines.length ? gap : 0);
+  return {
+    bounds: bounds, margins: margins, beforeLines: beforeLines, afterLines: afterLines, contentWidth: contentWidth,
+    left: left, top: top, right: right, bottom: bottom, gap: gap,
+    width: left + contentWidth + right,
+    diagramTop: diagramTop,
+    diagramHeight: diagramTop + bounds.height,
+    height: diagramTop + bounds.height + gap + afterHeight + bottom,
+    scale: scale, beforeText: String(beforeText || ""), afterText: String(afterText || "")
+  };
+}
+
+function drawFlowText(ctx, options, lines, y) {
+  ctx.fillStyle = "black";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.font = styleFontCSS(16);
+  lines.forEach(function (line, index) {
+    if (index && lines[index - 1].paragraphEnd) y += line.lineHeight * 0.5;
+    ctx.fillText(line.text, options.left, y);
+    y += line.lineHeight;
+  });
+}
+
+function renderFlowPNG(options) {
+  var out = document.createElement("canvas");
+  out.width = Math.max(1, Math.ceil(options.width * options.scale));
+  out.height = Math.max(1, Math.ceil(options.height * options.scale));
+  var ctx = out.getContext("2d");
+  ctx.scale(options.scale, options.scale);
+  ctx.translate(options.left - options.bounds.x, options.diagramTop - options.bounds.y);
+  var wasLocked = constrainToMargins, oldSelected = selectedObject;
+  constrainToMargins = false; selectedObject = null;
+  try { drawUsing(ctx, EXPORT_COLORS, true, true); }
+  finally { constrainToMargins = wasLocked; selectedObject = oldSelected; }
+  ctx.setTransform(options.scale, 0, 0, options.scale, 0, 0);
+  drawFlowText(ctx, options, options.beforeLines, options.top + 16);
+  drawFlowText(ctx, options, options.afterLines, options.diagramHeight + options.gap + 16);
+  return out;
 }
 
 function draw() {
@@ -3427,6 +3801,20 @@ function saveAsPNG() {
   selectedObject = null;
   var exportScale = (typeof selectedExportPpi === "function" ? selectedExportPpi() : 96) / 96;
   var ok = true;
+  if (exportFlow()) {
+    var flowCanvas = renderFlowPNG(flowExportOptions(exportBeforeText(), exportFollowingText(), exportScale * 96));
+    selectedObject = oldSelectedObject;
+    draw();
+    var flowOk = !shouldDownload || downloadDataURL(activeFSMFileName("png"), flowCanvas.toDataURL("image/png"));
+    if (shouldCopy) copyPNGCanvasToClipboard(flowCanvas).then(function (copied) {
+      if (shouldDownload && flowOk && copied) showToast("Fit-content PNG downloaded and copied");
+      else if (shouldDownload && flowOk) showToast("Fit-content PNG downloaded; clipboard copy unavailable");
+      else if (copied) showToast("Fit-content PNG copied");
+      else showToast("Could not copy PNG image", "error");
+    });
+    else if (flowOk) showToast("Fit-content PNG downloaded"); else showToast("Could not download PNG", "error");
+    return;
+  }
   if (!exportPaged()) {
     var fullCanvas = document.createElement("canvas");
     fullCanvas.width = Math.round(pageWidthPx() * exportScale); fullCanvas.height = Math.round(pageHeightPx() * pageCount * exportScale);
@@ -3483,6 +3871,19 @@ function saveAsSVG() {
   constrainToMargins = wasLocked;
   selectedObject = oldSelectedObject;
   var svgPaged = exportPaged();
+  if (exportFlow()) {
+    var fitOptions = flowExportOptions(exportBeforeText(), exportFollowingText(), 96);
+    firstSvg = exporter.toSVG(pageCount, pageMarginsForExport(), false, false, null, fitOptions);
+    var fitOk = !shouldDownload || downloadBlob(activeFSMFileName("svg"), firstSvg, "image/svg+xml;charset=utf-8");
+    Promise.resolve(shouldCopy ? copyToClipboard(firstSvg) : false).then(function (copied) {
+      if (shouldDownload && fitOk && shouldCopy && copied) showToast("Fit-content SVG downloaded and copied");
+      else if (shouldDownload && fitOk) showToast("Fit-content SVG downloaded");
+      else if (shouldDownload) showToast("Could not download SVG", "error");
+      else if (copied) showToast("Fit-content SVG copied");
+      else showToast("Could not copy SVG source", "error");
+    });
+    return;
+  }
   var ok = true;
   var firstSvg = "";
   if (svgPaged) {
@@ -3515,7 +3916,8 @@ function saveAsLaTeX() {
   drawUsing(exporter, EXPORT_COLORS);
   constrainToMargins = wasLocked;
   selectedObject = oldSelectedObject;
-  var texData = exporter.toLaTeX(snapshotJSON(), exportStandalone(), pageCount, pageMarginsForExport(), constrainToMargins, exportPaged());
+  var texFlowOptions = exportFlow() ? flowExportOptions(exportBeforeText(), exportFollowingText(), 96) : null;
+  var texData = exporter.toLaTeX(snapshotJSON(), exportStandalone(), pageCount, pageMarginsForExport(), constrainToMargins, exportFlow() ? "flow" : exportPaged(), exportFollowingText(), texFlowOptions, exportBeforeText());
   var downloaded = !shouldDownload || downloadBlob(activeFSMFileName("tex"), texData, "text/plain;charset=utf-8");
   Promise.resolve(shouldCopy ? copyToClipboard(texData) : false).then(function (copied) {
     if (shouldDownload && downloaded && shouldCopy && copied) showToast("LaTeX downloaded and copied");
@@ -3539,7 +3941,8 @@ function saveAsTypst() {
   selectedObject = oldSelectedObject;
   var json = snapshotJSON();
   if (typeof json !== "string") json = JSON.stringify(json);
-  var typData = exporter.toTypst(json, exportStandalone(), pageCount, pageMarginsForExport(), constrainToMargins, exportPaged());
+  var typFlowOptions = exportFlow() ? flowExportOptions(exportBeforeText(), exportFollowingText(), 96) : null;
+  var typData = exporter.toTypst(json, exportStandalone(), pageCount, pageMarginsForExport(), constrainToMargins, exportFlow() ? "flow" : exportPaged(), exportFollowingText(), typFlowOptions, exportBeforeText());
   var downloaded = !shouldDownload || downloadBlob(activeFSMFileName("typ"), typData, "text/plain;charset=utf-8");
   Promise.resolve(shouldCopy ? copyToClipboard(typData) : false).then(function (copied) {
     if (shouldDownload && downloaded && shouldCopy && copied) showToast("Typst downloaded and copied");

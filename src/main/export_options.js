@@ -3,11 +3,23 @@ var EXPORT_STANDALONE_KEY = "fsm-export-standalone";
 var EXPORT_LAYOUT_KEY = "fsm-export-layout";
 var EXPORT_COPY_KEY = "fsm-export-copy";
 var EXPORT_DOWNLOAD_KEY = "fsm-export-download";
+var EXPORT_FLOW_TEXT_KEY = "fsm-export-flow-text";
+var EXPORT_FLOW_BEFORE_TEXT_KEY = "fsm-export-before-text";
+var EXPORT_DIAGRAM_GAP_KEY = "fsm-export-diagram-gap-inches";
 var exportLayoutMode = "paged";
 var exportPpi = 300;
+var exportFlowText = "";
+var exportFlowBeforeText = "";
+var exportDiagramGap = 0.25;
 function selectedExportPpi() { return exportPpi; }
 
 function exportPaged() { return exportLayoutMode === "paged"; }
+function exportFollowingText() { var el = document.getElementById("export-flow-text"); return el ? el.value : exportFlowText; }
+function exportBeforeText() { var el = document.getElementById("export-flow-before-text"); return el ? el.value : exportFlowBeforeText; }
+// Entering continuation text opts LaTeX and Typst into flowing layout directly,
+// so users do not have to find or change the layout selector first.
+function exportFlow() { return exportLayoutMode === "flow" || !!String(exportFollowingText() || "").trim() || !!String(exportBeforeText() || "").trim(); }
+function exportDiagramGapInches() { return exportDiagramGap; }
 function exportCopyEnabled() { var el = document.getElementById("export-copy"); return el ? el.checked : true; }
 function exportDownloadEnabled() { var el = document.getElementById("export-download"); return el ? el.checked : true; }
 
@@ -92,7 +104,9 @@ function wireExportOptionsUI() {
   });
   var label = document.createElement("label");
   label.style.cssText = "display:inline-flex;align-items:center;gap:6px;cursor:pointer;";
-  label.title = "Controls whether LaTeX includes its document preamble. Export layout is selected separately; Typst always includes the page size needed to match the editor.";
+  label.title = exportFlow()
+    ? "Checked: export a complete LaTeX or Typst document. Unchecked: export source to insert into an existing document."
+    : "Controls whether LaTeX includes its document preamble.";
   var box = document.createElement("input");
   box.type = "checkbox";
   box.id = "export-standalone";
@@ -107,9 +121,8 @@ function wireExportOptionsUI() {
     } catch (e) {}
   });
   label.appendChild(box);
-  label.appendChild(
-    document.createTextNode("Standalone LaTeX document"),
-  );
+  var standaloneCaption = document.createTextNode(exportFlow() ? "Full document (LaTeX / Typst)" : "Standalone LaTeX document");
+  label.appendChild(standaloneCaption);
   checksRow.appendChild(label);
 
   var layoutLabel = document.createElement("label");
@@ -117,18 +130,108 @@ function wireExportOptionsUI() {
   layoutLabel.appendChild(document.createTextNode("Export layout"));
   var layout = document.createElement("select");
   layout.id = "export-layout";
-  [["paged", "Paper pages (page size and selected margins)"], ["full", "Full diagram (one uncropped tall export)"]].forEach(function (item) {
+  [["paged", "Paper pages (page size and selected margins)"], ["full", "Full diagram (one uncropped tall export)"], ["flow", "Fit to content (FSM + text)"]].forEach(function (item) {
     var option = document.createElement("option"); option.value = item[0]; option.textContent = item[1]; layout.appendChild(option);
   });
   try { exportLayoutMode = localStorage.getItem(EXPORT_LAYOUT_KEY) || "paged"; } catch (e) { exportLayoutMode = "paged"; }
-  if (exportLayoutMode !== "full") exportLayoutMode = "paged";
+  if (["full", "flow"].indexOf(exportLayoutMode) < 0) exportLayoutMode = "paged";
   layout.value = exportLayoutMode;
+  standaloneCaption.nodeValue = exportFlow() ? "Full document (LaTeX / Typst)" : "Standalone LaTeX document";
+  label.title = exportFlow()
+    ? "Checked: export a complete LaTeX or Typst document. Unchecked: export source to insert into an existing document."
+    : "Controls whether LaTeX includes its document preamble.";
   layout.addEventListener("change", function () {
     exportLayoutMode = layout.value;
     try { localStorage.setItem(EXPORT_LAYOUT_KEY, exportLayoutMode); } catch (e) {}
+    flowTextLabel.hidden = false;
+    standaloneCaption.nodeValue = exportFlow() ? "Full document (LaTeX / Typst)" : "Standalone LaTeX document";
+    label.title = exportFlow()
+      ? "Checked: export a complete LaTeX or Typst document. Unchecked: export source to insert into an existing document."
+      : "Controls whether LaTeX includes its document preamble.";
   });
   layoutLabel.appendChild(layout);
   settingsRow.appendChild(layoutLabel);
+
+  var beforeTextLabel = document.createElement("label");
+  beforeTextLabel.style.cssText = "display:flex;flex-direction:column;gap:4px;width:100%;max-width:760px;";
+  beforeTextLabel.appendChild(document.createTextNode("Text before the FSM (optional; plain text, blank lines start paragraphs)"));
+  var beforeText = document.createElement("textarea");
+  beforeText.id = "export-flow-before-text";
+  beforeText.rows = 3;
+  beforeText.placeholder = "For example: We now examine the machine below.";
+  beforeText.style.cssText = "width:100%;resize:vertical;";
+  try { exportFlowBeforeText = localStorage.getItem(EXPORT_FLOW_BEFORE_TEXT_KEY) || ""; } catch (e) { exportFlowBeforeText = ""; }
+  beforeText.value = exportFlowBeforeText;
+  beforeTextLabel.appendChild(beforeText);
+  row.appendChild(beforeTextLabel);
+
+  var flowTextLabel = document.createElement("label");
+  flowTextLabel.id = "export-flow-text-label";
+  flowTextLabel.style.cssText = "display:flex;flex-direction:column;gap:4px;width:100%;max-width:760px;";
+  flowTextLabel.appendChild(document.createTextNode("Text after the FSM (optional; plain text, blank lines start paragraphs)"));
+  var flowText = document.createElement("textarea");
+  flowText.id = "export-flow-text";
+  flowText.rows = 4;
+  flowText.placeholder = "For example: This machine accepts strings whose final three symbols are abb.";
+  flowText.style.cssText = "width:100%;resize:vertical;";
+  try { exportFlowText = localStorage.getItem(EXPORT_FLOW_TEXT_KEY) || ""; } catch (e) { exportFlowText = ""; }
+  flowText.value = exportFlowText;
+  if (exportFlowText.trim() || exportFlowBeforeText.trim()) {
+    exportLayoutMode = "flow";
+    layout.value = "flow";
+    standaloneCaption.nodeValue = "Full document (LaTeX / Typst)";
+    label.title = "Checked: export a complete LaTeX or Typst document. Unchecked: export a source snippet for an existing document.";
+    try { localStorage.setItem(EXPORT_LAYOUT_KEY, "flow"); } catch (e) {}
+  }
+  beforeText.addEventListener("input", function () {
+    exportFlowBeforeText = beforeText.value;
+    try { localStorage.setItem(EXPORT_FLOW_BEFORE_TEXT_KEY, exportFlowBeforeText); } catch (e) {}
+    if (exportFlowBeforeText.trim()) {
+      exportLayoutMode = "flow";
+      layout.value = "flow";
+      standaloneCaption.nodeValue = "Full document (LaTeX / Typst)";
+      label.title = "Checked: export a complete LaTeX or Typst document. Unchecked: export a source snippet for an existing document.";
+      try { localStorage.setItem(EXPORT_LAYOUT_KEY, "flow"); } catch (e) {}
+    }
+  });
+  flowText.addEventListener("input", function () {
+    exportFlowText = flowText.value;
+    try { localStorage.setItem(EXPORT_FLOW_TEXT_KEY, exportFlowText); } catch (e) {}
+    if (exportFlowText.trim()) {
+      exportLayoutMode = "flow";
+      layout.value = "flow";
+      standaloneCaption.nodeValue = "Full document (LaTeX / Typst)";
+      label.title = "Checked: export a complete LaTeX or Typst document. Unchecked: export a source snippet for an existing document.";
+      try { localStorage.setItem(EXPORT_LAYOUT_KEY, "flow"); } catch (e) {}
+    }
+  });
+  flowTextLabel.appendChild(flowText);
+  flowTextLabel.hidden = false;
+  row.appendChild(flowTextLabel);
+
+  var gapLabel = document.createElement("label");
+  gapLabel.style.cssText = "display:inline-flex;align-items:center;gap:6px;";
+  gapLabel.appendChild(document.createTextNode("Gap between FSM and adjacent text (inches; bottom padding if both text boxes are blank)"));
+  var gapInput = document.createElement("input");
+  gapInput.id = "export-diagram-gap";
+  gapInput.type = "number";
+  gapInput.min = "0";
+  gapInput.max = "4";
+  gapInput.step = "0.05";
+  try {
+    var savedGap = localStorage.getItem(EXPORT_DIAGRAM_GAP_KEY);
+    exportDiagramGap = savedGap === null ? 0.25 : Math.max(0, Math.min(4, Number(savedGap) || 0));
+  } catch (e) { exportDiagramGap = 0.25; }
+  gapInput.value = String(exportDiagramGap);
+  gapInput.style.width = "5.5em";
+  gapInput.addEventListener("input", function () {
+    var value = Number(gapInput.value);
+    if (!isFinite(value)) return;
+    exportDiagramGap = Math.max(0, Math.min(4, value));
+    try { localStorage.setItem(EXPORT_DIAGRAM_GAP_KEY, String(exportDiagramGap)); } catch (e) {}
+  });
+  gapLabel.appendChild(gapInput);
+  row.appendChild(gapLabel);
 
   var ppiLabel = document.createElement("label");
   ppiLabel.style.cssText = "display:inline-flex;align-items:center;gap:6px;";

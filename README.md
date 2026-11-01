@@ -63,7 +63,14 @@ Developed and tested on Python 3.11. Regex conversion and the Lean buttons talk 
 **Paged output**
 - US Letter or A4 pages with margin presets (IEEE conference, Chicago, MLA, APA, custom), page zoom, and an option to keep states and labels inside the margins.
 - Export to **PNG** (per page), **SVG**, **LaTeX (TikZ)** and **Typst (CeTZ)**, either as paper pages or one full diagram; optional standalone, compile‑ready files. Exports are black on transparent regardless of theme.
+- **Flowing document export** for LaTeX and Typst places the FSM as a sized figure and lets following prose continue immediately after it. Choose **FSM then flowing text**, enter paragraphs in the text box, and use the full-document checkbox for a compile-ready file or turn it off for an embeddable snippet.
 - A `.typ` or `.tex` file the tool exported can be **imported back** (the diagram is stored in a comment).
+
+### Flowing text after an FSM
+
+Choose **FSM then flowing text** under **Export layout**. Add plain text in the box that appears; blank lines start new paragraphs. Download or copy LaTeX or Typst. With **Full document** checked, the export sets the selected page size and all four margins. With it unchecked, it emits an embeddable snippet and a comment listing the margin values to apply in the host document. The custom top, bottom, left, and right fields are in inches, like the existing page controls.
+
+Example: for US Letter with top and bottom margins of `0.75 in`, a left margin of `1 in`, and a right margin of `0.75 in`, the printable box is `6.75 × 9.5 in` (`8.5 − 1 − 0.75` wide and `11 − 0.75 − 0.75` high). For the `(a|b)*abb` example FSM, following text could be: “This DFA accepts strings over `{a,b}` that end in `abb`.” The standalone LaTeX export constrains the figure to that printable box; Typst scales it to the available text width. Both place the paragraph after the figure in normal page flow. If there is not enough room below the figure, the paragraph continues on the next page. This gives a direct check of the selected page bounds and expected flow.
 
 **Automaton properties panel** (right side)
 - DFA, NFA, Moore machine, and Mealy machine modes, with determinism, completeness, reachability, dead-state, and output-label validation.
