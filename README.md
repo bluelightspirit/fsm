@@ -16,6 +16,8 @@ https://jimmyhmiller.com/fsm-maker/ is probably one of the most straightforward 
 
 LaTeX shortcuts at https://formalsketch.github.io/ probably would work for this project, but I don't know where the code by Iman Mohammadi is at.
 
+Finite state automaton via the CFG generated to regex converting is a WIP by Claude free messages delay. How fun it is to code without paying a penny to Claude...
+
 ## Note for licenses
 
 MIT. Original copyright © 2010 Evan Wallace. See the header in `src/_license.js`. Third-party components and references, including PyPantograph (Apache-2.0, optional, installed separately), are listed in [NOTICE.md](NOTICE.md). There is no LICENSE.md because there is more than 1 license used in this project.
