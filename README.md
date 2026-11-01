@@ -28,7 +28,7 @@ Status:
 Now I will go after the 5th WIP.
 
 Update:
-Going after the 5th WIP to try to have text merge with the FSM on the top and bottom is not as simple as it seems to do... It used up way too many Codex tokens so now I am stuck on the waiting for Claude loop!
+Going after the 5th WIP to try to have text merge with the FSM on the top and bottom is not as simple as it seems to do... It used up way too many Codex tokens so now I am stuck on the waiting for Claude loop! Currently, the export does not separate the FSM into separate pages. The main way to make this work I'd assume is to integrate text into the canvas itself... perhaps the 3rd/4th WIPS would have been more achievable... oh well. Not gonna back out. Time to wait probably a whole nother month.
 
 ## Note for licenses
 
