@@ -6,7 +6,7 @@ Live original: <http://madebyevan.com/fsm/>
 
 The editor is vanilla JavaScript plus a small Python server. **The base install needs no packages** — only Python 3 and a browser. 
 
-The purpose of making this is because in a generic Brave search, I didn't find any easy-to-use and obviously set margin and paper size based DFA/NFA generator out there for some reason. Most of them are of an unlimited scale, which is not how papers are sized.
+The purpose of making this is because in a generic Brave search, I didn't find any easy-to-use and obviously set margin and paper size based DFA/NFA generator out there for some reason. Most of them are of an unlimited scale, which is not how papers are sized. https://abpaudel.com/fsm-designer/ is close since it covers width and height in pixels as boundaries for the FSM but does not support multiple pages or seem to be an easy copy and paste solution straight into LaTeX while respecting margins correctly...
 
 ## Note for licenses
 
