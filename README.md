@@ -37,7 +37,7 @@ The project does have a right-linear grammar (a regular subset of CFGs) generato
 ## Quick start
 
 ```bash
-git clone https://github.com/bluelightspirit/fsm.git
+git clone --branch my-main https://github.com/bluelightspirit/fsm.git
 cd fsm
 python3 server.py            # then open http://localhost:8000
 ```
