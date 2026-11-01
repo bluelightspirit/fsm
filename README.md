@@ -1,4 +1,4 @@
-# Finite State Machine Designer
+# Finite State Machine (Type 3) Designer
 
 A browser tool for sketching finite state machines and getting them into papers (A4 and US Letter) by following their respective margins and paper sizes in inches. Originally created by [Evan Wallace](http://madebyevan.com/fsm/) in 2010; this fork adds multi‑FSM workspaces, undo/redo and theming ([Moeein Aali](https://github.com/MoeeinAali)), plus paged exports to LaTeX/Typst, regex → automaton conversion, and optional Lean 4 checking.
 
@@ -6,7 +6,26 @@ Live original: <http://madebyevan.com/fsm/>
 
 The editor is vanilla JavaScript plus a small Python server. Regex conversion uses Pyformlang; install the requirements before starting the server.
 
-The purpose of making this is because in a generic Brave search, I didn't find any easy-to-use and obviously set margin and paper size based DFA/NFA generator out there for some reason. Most of them are of an unlimited scale, which is not how papers are sized.
+The purpose of making this is because in a generic Brave search, I didn't find any easy-to-use and obviously set margin and paper size based DFA/NFA generator out there for some reason. Most of them are of an unlimited scale or limited to 1 set canvas scale, which is not how papers are sized (as they can be multiple pages). https://abpaudel.com/fsm-designer/ is close since it covers width and height in pixels as boundaries for the FSM but does not support multiple pages or seem to be an easy copy and paste solution straight into LaTeX while respecting margins correctly... And I don't bother with exporting with JSON like https://github.com/yalue/fsm_designer does and just use internal comments in Typst or LaTeX instead since there is probably a sizable amount of people who would rather avoid JSON at all costs. I also don't bother with chip firing game weight stuff like https://markusfeng.com/projects/graph/ does as I don't have all the time in world...
+
+The live editing way for diagrams may exist at https://www.reddit.com/r/programming/comments/a39sq3/comment/eb5el3w/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button among others - but these are of an unlimited scale again. I don't see obviously set paper margins or page separations available. https://web.cs.ucdavis.edu/~doty/automata/ is another live editing one.
+
+Serializing global variables per https://www.reddit.com/r/programming/comments/a39sq3/comment/emr02o9/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button probably is a good idea also for compilers. I don't have all the time in the world for adding these either...
+
+https://jimmyhmiller.com/fsm-maker/ is probably one of the most straightforward design options for text to FSM. I don't have all the time in the world to revamp the States & arrows section to be like that...
+
+MATLAB at https://www.mathworks.com/help/hdlcoder/ug/model-a-state-machine-for-hdl-code-generation.html or Verilog at https://www.reddit.com/r/Verilog/comments/17c3bld/implementing_a_mealy_state_machine/ also can generate FSMs - but bothering trying to convert all MATLAB/Verilog code to FSMs here is not a realistic goal because of the known limitations of states portion and because I don't have all the time in the world. The same is true for JAX at https://google-research.github.io/self-organising-systems/2022/diff-fsm/ or PLCs at https://industrialmonitordirect.com/blogs/knowledgebase/state-machine-design-in-plc-programming-mealy-moore-and-implementation-approaches >_>
+
+I also have no idea why https://vlsiverify.com/verilog/fsm-and-sequence-detector/ says only mealy machine and moore machines are ways to design FSMs... I guess Verilog is something else.
+
+LaTeX shortcuts at https://formalsketch.github.io/ probably would work for this project, but I don't know where the code by Iman Mohammadi is at.
+
+Finite state automaton via the CFG generated to regex converting is a WIP by Claude free messages delay. How fun it is to code without paying a penny to Claude... Moore and mealy machines also would make sense to make as part of type 3 designs. However, the first priority is converting CFG to regex. This is a a 2nd WIP. A 3rd WIP may be to try to attempt converting CFGs to regular languages, but that is easier said than done IMO because I'd have to do proofs in Lean 4 and/or Python to even be certain it is a type 3 language being converted instead of a type 2... The 4th WIP most likely will be unit tests / proofs by hand / seeing if Lean 4 and Python match human-made proofs. The 5th WIP (may change order later - this sounds vital tbh) would be to give examples and do proofs on trying to integrate FSMs for pages while also incorporating text right after the FSM ends instead of waiting for the page to end entirely. Oh for that one I'd want custom inch margin boundaries for the edges.
+
+## Note for licenses
+
+MIT. Original copyright © 2010 Evan Wallace. See the header in `src/_license.js`. Third-party components and references, including PyPantograph (Apache-2.0, optional, installed separately), are listed in [NOTICE.md](NOTICE.md). There is no LICENSE.md because there is more than 1 license used in this project.
+
 
 ## Note for AI usage
 
@@ -16,7 +35,7 @@ I do declare this as vibecoded instead of just "Permissive AI Policy" per https:
 
 ## Note for design issues and missing features
 
-Also, it should be noted that IEEE Conference is 2 column limited. Respecting the 2 column rule while maintaining all margins for US Letter and A4 for DFAs and NFAs probably would take another entire month or so of prompting as Claude takes eternity to develop things for free. Generic ChatGPT or the likes with less limitations would probably not get me anywhere. 
+Also, it should be noted that IEEE Conference is 2 column limited. Respecting the 2 column rule while maintaining all margins for US Letter and A4 for DFAs and NFAs probably would take another entire month or so of prompting as Claude takes eternity to develop things for free. Generic ChatGPT or the likes with less limitations would probably not get me anywhere.
 
 Typst labels for DFAs/NFAs as an alternative option to LaTeX also would probably take another week of prompting and waiting by Claude. 
 
@@ -202,12 +221,6 @@ fsm_workspace = { version: 2, activeId, fsms: [{ id, name, createdAt, updatedAt 
 fsm_data_<id> = { nodes: [...], links: [...] }
 fsm_theme     = "system" | "light" | "dark"
 ```
-
----
-
-## License
-
-MIT. Original copyright © 2010 Evan Wallace. See the header in `src/_license.js`. Third-party components and references, including PyPantograph (Apache-2.0, optional, installed separately), are listed in [NOTICE.md](NOTICE.md).
 
 ---
 
