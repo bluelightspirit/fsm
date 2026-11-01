@@ -27,6 +27,9 @@ Status:
 2nd WIP now 1st WIP. Well - moore and mealy machines are added. Trying to make proofs to convert between them and DFAs/NFAs require brain power in my head though versus NFA/DFA I was taught at UMW... >_>
 Now I will go after the 5th WIP.
 
+Update:
+Going after the 5th WIP to try to have text merge with the FSM on the top and bottom is not as simple as it seems to do... It used up way too many Codex tokens so now I am stuck on the waiting for Claude loop!
+
 ## Note for licenses
 
 MIT. Original copyright © 2010 Evan Wallace. See the header in `src/_license.js`. Third-party components and references, including PyPantograph (Apache-2.0, optional, installed separately), are listed in [NOTICE.md](NOTICE.md). There is no LICENSE.md because there is more than 1 license used in this project.
