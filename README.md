@@ -18,7 +18,7 @@ MATLAB at https://www.mathworks.com/help/hdlcoder/ug/model-a-state-machine-for-h
 
 LaTeX shortcuts at https://formalsketch.github.io/ probably would work for this project, but I don't know where the code by Iman Mohammadi is at.
 
-Finite state automaton via the CFG generated to regex converting is a WIP by Claude free messages delay. How fun it is to code without paying a penny to Claude... Moore and mealy machines also would make sense to make as part of type 3 designs. However, the first priority is converting CFG to regex. This is a a 2nd WIP. A 3rd WIP may be to try to attempt converting CFGs to regular languages, but that is easier said than done IMO because I'd have to do proofs in Lean 4 and/or Python to even be certain it is a type 3 language being converted instead of a type 2...
+Finite state automaton via the CFG generated to regex converting is a WIP by Claude free messages delay. How fun it is to code without paying a penny to Claude... Moore and mealy machines also would make sense to make as part of type 3 designs. However, the first priority is converting CFG to regex. This is a a 2nd WIP. A 3rd WIP may be to try to attempt converting CFGs to regular languages, but that is easier said than done IMO because I'd have to do proofs in Lean 4 and/or Python to even be certain it is a type 3 language being converted instead of a type 2... The 4th WIP most likely will be unit tests / proofs by hand / seeing if Lean 4 and Python match human-made proofs.
 
 ## Note for licenses
 
