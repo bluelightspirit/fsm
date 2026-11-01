@@ -14,6 +14,8 @@ Serializing global variables per https://www.reddit.com/r/programming/comments/a
 
 https://jimmyhmiller.com/fsm-maker/ is probably one of the most straightforward design options for text to FSM. I don't have all the time in the world to revamp the States & arrows section to be like that...
 
+MATLAB at https://www.mathworks.com/help/hdlcoder/ug/model-a-state-machine-for-hdl-code-generation.html or Verilog at https://www.reddit.com/r/Verilog/comments/17c3bld/implementing_a_mealy_state_machine/ also can generate FSMs - but bothering trying to convert all MATLAB/Verilog code to FSMs here is not a realistic goal because of the known limitations of states portion and because I don't have all the time in the world.
+
 LaTeX shortcuts at https://formalsketch.github.io/ probably would work for this project, but I don't know where the code by Iman Mohammadi is at.
 
 Finite state automaton via the CFG generated to regex converting is a WIP by Claude free messages delay. How fun it is to code without paying a penny to Claude... Moore and mealy machines also would make sense to make as part of type 3 designs. However, the first priority is converting CFG to regex. This is a a 2nd WIP.
