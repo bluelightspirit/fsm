@@ -20,7 +20,7 @@ Also, it should be noted that IEEE Conference is 2 column limited. Respecting th
 
 Typst labels for DFAs/NFAs as an alternative option to LaTeX also would probably take another week of prompting and waiting by Claude. 
 
-Having a bulk select and delete option on the left side also would be nice, but would probably take another week of prompting and waiting by Claude as well.
+Having a bulk select and delete option on the left side to manage FSMs or a search bar of them also would be nice, but would probably take another week of prompting and waiting by Claude as well.
 
 A JavaScript or TypeScript library probably would've been more wise to use over vanilla JS for purposes of having to write less code while having more features available, but that is a hindsight problem. At least vanilla JS you don't have to deal with the plethora of vulnerabilities React, Node.js, and others get all the time. Although that doesn't matter TOO MUCH if code is run locally, it may be problematic for servers that may want to host this online in the future.
 
