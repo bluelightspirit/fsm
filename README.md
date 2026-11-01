@@ -10,7 +10,8 @@ The purpose of making this is because in a generic Brave search, I didn't find a
 
 ## Note for licenses
 
-The licenses are found at NOTICE.md as there is more than 1 license used in this project.
+MIT. Original copyright © 2010 Evan Wallace. See the header in `src/_license.js`. Third-party components and references, including PyPantograph (Apache-2.0, optional, installed separately), are listed in [NOTICE.md](NOTICE.md). There is no LICENSE.md because there is more than 1 license used in this project.
+
 
 ## Note for AI usage
 
@@ -203,12 +204,6 @@ fsm_workspace = { version: 2, activeId, fsms: [{ id, name, createdAt, updatedAt 
 fsm_data_<id> = { nodes: [...], links: [...] }
 fsm_theme     = "system" | "light" | "dark"
 ```
-
----
-
-## License
-
-MIT. Original copyright © 2010 Evan Wallace. See the header in `src/_license.js`. Third-party components and references, including PyPantograph (Apache-2.0, optional, installed separately), are listed in [NOTICE.md](NOTICE.md).
 
 ---
 
