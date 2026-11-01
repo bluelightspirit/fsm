@@ -8,6 +8,10 @@ The editor is vanilla JavaScript plus a small Python server. **The base install 
 
 The purpose of making this is because in a generic Brave search, I didn't find any easy-to-use and obviously set margin and paper size based DFA/NFA generator out there for some reason. Most of them are of an unlimited scale, which is not how papers are sized.
 
+## Note for licenses
+
+The licenses are found at NOTICE.md as there is more than 1 license used in this project.
+
 ## Note for AI usage
 
 For transparency purposes, the bulk of this has been vibecoded by Claude Code and Codex. However, proofs have been made for LaTeX and Typst for margins to the best of my ability, while Lean 4 and Python combined with some personal tests tested DFAs and NFAs for validity. If you find any issues, feel free to make a pull request. I see that I can't raise issues in this project since it is a fork - so I may duplicate this soon so that the public can propose changes if they want.
