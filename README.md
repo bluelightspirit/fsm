@@ -1,10 +1,36 @@
 # Finite State Machine Designer
 
-A browser tool for sketching finite state machines and getting them into papers. Originally created by [Evan Wallace](http://madebyevan.com/fsm/) in 2010; this fork adds multi‑FSM workspaces, undo/redo and theming ([Moeein Aali](https://github.com/MoeeinAali)), plus paged exports to LaTeX/Typst, regex → automaton conversion, and optional Lean checking.
+A browser tool for sketching finite state machines and getting them into papers (A4 and US Letter) by following their respective margins and paper sizes in inches. Originally created by [Evan Wallace](http://madebyevan.com/fsm/) in 2010; this fork adds multi‑FSM workspaces, undo/redo and theming ([Moeein Aali](https://github.com/MoeeinAali)), plus paged exports to LaTeX/Typst, regex → automaton conversion, and optional Lean 4 checking.
 
 Live original: <http://madebyevan.com/fsm/>
 
-The editor is vanilla JavaScript plus a small Python server. **The base install needs no packages** — only Python 3 and a browser.
+The editor is vanilla JavaScript plus a small Python server. **The base install needs no packages** — only Python 3 and a browser. 
+
+The purpose of making this is because in a generic Brave search, I didn't find any easy-to-use and obviously set margin and paper size based DFA/NFA generator out there for some reason. Most of them are of an unlimited scale, which is not how papers are sized.
+
+## Note for AI usage
+
+For transparency purposes, the bulk of this has been vibecoded by Claude Code and Codex. However, proofs have been made for LaTeX and Typst for margins to the best of my ability, while Lean 4 and Python combined with some personal tests tested DFAs and NFAs for validity. If you find any issues, feel free to make a pull request. I see that I can't raise issues in this project since it is a fork - so I may duplicate this soon so that the public can propose changes if they want.
+
+I do declare this as vibecoded instead of just "Permissive AI Policy" per https://codeberg.org/ethical-foss/ai-free-foss-alternatives#vibecoded since I only hardcode changed HTML and Python here and there. I didn't bother touching JavaScript but did view it sometimes as efforts to figure out where Claude or Codex messed up.
+
+## Note for design issues and missing features
+
+Also, it should be noted that IEEE Conference is 2 column limited. Respecting the 2 column rule while maintaining all margins for US Letter and A4 for DFAs and NFAs probably would take another entire month or so of prompting as Claude takes eternity to develop things for free. Generic ChatGPT or the likes with less limitations would probably not get me anywhere. 
+
+Typst labels for DFAs/NFAs as an alternative option to LaTeX also would probably take another week of prompting and waiting by Claude. 
+
+Having a bulk select and delete option on the left side also would be nice, but would probably take another week of prompting and waiting by Claude as well.
+
+A JavaScript or TypeScript library probably would've been more wise to use over vanilla JS for purposes of having to write less code while having more features available, but that is a hindsight problem. At least vanilla JS you don't have to deal with the plethora of vulnerabilities React, Node.js, and others get all the time. Although that doesn't matter TOO MUCH if code is run locally, it may be problematic for servers that may want to host this online in the future.
+
+## Note for future projects
+
+Turing machines and PDAs are similarly designed with states and transitions like DFA/NFAs. However, for that to work out, an entire new project would have to be started with different Lean 4 proofs, Python proofs, and design between transitions as far as I'm aware - or just a new tab at the top of this project. This is because PDAs/general CFGs represent context-free languages, while turing machines represent recursively enumerable languages. 
+
+## Another random note
+
+The project does have a right-linear grammar (a regular subset of CFGs) generator from the current FSM available.
 
 ---
 
