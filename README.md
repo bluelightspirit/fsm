@@ -12,6 +12,8 @@ The live editing way for diagrams may exist at https://www.reddit.com/r/programm
 
 Serializing global variables per https://www.reddit.com/r/programming/comments/a39sq3/comment/emr02o9/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button probably is a good idea also for compilers. I don't have all the time in the world for adding these either...
 
+https://jimmyhmiller.com/fsm-maker/ is probably one of the most straightforward design options for text to FSM. I don't have all the time in the world to revamp the States & arrows section to be like that...
+
 LaTeX shortcuts at https://formalsketch.github.io/ probably would work for this project, but I don't know where the code by Iman Mohammadi is at.
 
 ## Note for licenses
