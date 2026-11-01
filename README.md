@@ -8,6 +8,8 @@ The editor is vanilla JavaScript plus a small Python server. **The base install 
 
 The purpose of making this is because in a generic Brave search, I didn't find any easy-to-use and obviously set margin and paper size based DFA/NFA generator out there for some reason. Most of them are of an unlimited scale, which is not how papers are sized. https://abpaudel.com/fsm-designer/ is close since it covers width and height in pixels as boundaries for the FSM but does not support multiple pages or seem to be an easy copy and paste solution straight into LaTeX while respecting margins correctly... And I don't bother with exporting with JSON like https://github.com/yalue/fsm_designer does and just use internal comments in Typst or LaTeX instead since there is probably a sizable amount of people who would rather avoid JSON at all costs. I also don't bother with chip firing game weight stuff like https://markusfeng.com/projects/graph/ does as I don't have all the time in world...
 
+LaTeX shortcuts at https://formalsketch.github.io/ probably would work for this project, but I don't know where the code by Iman Mohammadi is at.
+
 ## Note for licenses
 
 MIT. Original copyright © 2010 Evan Wallace. See the header in `src/_license.js`. Third-party components and references, including PyPantograph (Apache-2.0, optional, installed separately), are listed in [NOTICE.md](NOTICE.md). There is no LICENSE.md because there is more than 1 license used in this project.
