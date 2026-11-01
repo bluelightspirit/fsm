@@ -14,7 +14,7 @@ Serializing global variables per https://www.reddit.com/r/programming/comments/a
 
 https://jimmyhmiller.com/fsm-maker/ is probably one of the most straightforward design options for text to FSM. I don't have all the time in the world to revamp the States & arrows section to be like that...
 
-MATLAB at https://www.mathworks.com/help/hdlcoder/ug/model-a-state-machine-for-hdl-code-generation.html or Verilog at https://www.reddit.com/r/Verilog/comments/17c3bld/implementing_a_mealy_state_machine/ also can generate FSMs - but bothering trying to convert all MATLAB/Verilog code to FSMs here is not a realistic goal because of the known limitations of states portion and because I don't have all the time in the world.
+MATLAB at https://www.mathworks.com/help/hdlcoder/ug/model-a-state-machine-for-hdl-code-generation.html or Verilog at https://www.reddit.com/r/Verilog/comments/17c3bld/implementing_a_mealy_state_machine/ also can generate FSMs - but bothering trying to convert all MATLAB/Verilog code to FSMs here is not a realistic goal because of the known limitations of states portion and because I don't have all the time in the world. The same is true for JAX at https://google-research.github.io/self-organising-systems/2022/diff-fsm/ >_>
 
 LaTeX shortcuts at https://formalsketch.github.io/ probably would work for this project, but I don't know where the code by Iman Mohammadi is at.
 
