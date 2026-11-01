@@ -632,6 +632,7 @@
               <li><b>Greek letters:</b> <kbd>\alpha</kbd>, <kbd>\Sigma</kbd>, ... (also inside subscripts, e.g. <kbd>s_\alpha</kbd>)</li>
               <li><b>Cheat sheets:</b> <a href="https://wch.github.io/latexsheet/" target="_blank" rel="noopener">LaTeX</a> &middot; <a href="https://github.com/mewmew/typst-cheat-sheet" target="_blank" rel="noopener">Typst #1</a> &middot; <a href="https://github.com/christopherkenny/skills/tree/main/skills/latex-to-typst/references" target="_blank" rel="noopener">Typst #2</a></li>
               <li><b>Official docs:</b> <a href="https://www.latex-project.org/help/documentation/" target="_blank" rel="noopener">LaTeX</a> &middot; <a href="https://typst.app/docs/guides/for-latex-users/" target="_blank" rel="noopener">Typst for LaTeX users</a></li>
+              <li><b>Python-style regex docs:</b> <a href="https://pyformlang.readthedocs.io/en/latest/usage.html" target="_blank" rel="noopener">Pyformlang usage guide</a></li>
               <li><b>Label formatting:</b> LaTeX commands such as <kbd>\textbf{...}</kbd> and <kbd>\url{...}</kbd> are not supported in labels yet. Support and separate Typst/LaTeX label variants are still undecided.</li>
               <li>
                 <b>Undo / Redo:</b> <kbd>Cmd/Ctrl</kbd>+<kbd>Z</kbd> ·
@@ -646,11 +647,12 @@
         <h2>Automaton properties</h2>
         <div class="analysis-controls">
           <label>Machine type
-            <select id="automata-type"><option value="dfa">DFA</option><option value="nfa">NFA (ε allowed)</option></select>
+            <select id="automata-type"><option value="dfa">DFA</option><option value="nfa">NFA (ε allowed)</option><option value="moore">Moore machine</option><option value="mealy">Mealy machine</option></select>
           </label>
           <label>Alphabet (comma-separated)
             <input id="automata-alphabet" type="text" placeholder="Inferred from arrow labels" autocomplete="off" />
           </label>
+          <div class="analysis-muted">For Moore machines, label states <code>q0/accept</code>. For Mealy machines, label arrows <code>a/accept</code>; separate alternatives with commas. Double-ring accept markers are ignored for Moore/Mealy; their outputs determine acceptance conversions.</div>
           <div class="analysis-actions"><button id="automata-validate" type="button">Validate</button><button id="automata-lean" type="button">Check with Lean</button></div>
         </div>
         <div class="analysis-summary" id="automata-summary">Read the current states and arrows.</div>
@@ -662,22 +664,29 @@
             <input id="automata-regex" type="text" placeholder="(a|b)*abb" autocomplete="off" />
           </label>
           <label>Generate
-            <select id="automata-regex-mode"><option value="nfa">ε-NFA</option><option value="dfa">DFA</option></select>
+            <select id="automata-regex-mode"><option value="nfa">ε-NFA</option><option value="dfa">DFA</option><option value="moore">Moore machine</option><option value="mealy">Mealy machine</option></select>
           </label>
           <div class="analysis-actions"><button id="automata-regex-create" type="button">Create as new FSM</button></div>
-          <div class="analysis-muted">Uses Pyformlang's Python-style regex syntax (for example, <code>|</code> for union, <code>*</code> for zero or more, <code>+</code> for one or more). Creates a separate FSM; Lean can check its structural invariants.</div>
+          <div class="analysis-muted">Uses Pyformlang's PythonRegex syntax (for example, <code>|</code> for union, <code>*</code> for zero or more, <code>+</code> for one or more, plus Python-style character classes and bounded repetitions). Expressions describe whole strings; <code>^</code>/<code>$</code> anchors are not supported (<code>^</code> is a literal symbol). For strings beginning with <code>dog</code> and followed only by lowercase letters, use <code>dog[a-z]*</code>. Avoid <code>dog.*</code> for DFA output: dot expands to all printable characters and can exceed the 2,048-transition limit. In formal theory, expand the alphabet explicitly, e.g. <code>dog(a+b+c+d+e+f+g+h+i+j+k+l+m+n+o+p+q+r+s+t+u+v+w+x+y+z)*</code>; <code>Σ</code> is notation, not a special token in the parser. Moore/Mealy outputs are <code>accept</code> or <code>reject</code> based on the DFA state after each input. Lean checks the acceptor interpretation's structure.</div>
         </div>
         <hr class="analysis-separator" />
         <h3>Convert</h3>
-        <div class="analysis-actions"><button id="automata-convert" type="button">NFA → DFA</button></div>
-        <div class="analysis-muted" id="automata-convert-note">Creates a separate FSM in the left workspace list using subset construction.</div>
+        <div class="analysis-controls">
+          <label>Convert current machine to
+            <select id="automata-convert-target"><option value="dfa">DFA</option><option value="nfa">NFA</option><option value="moore">Moore machine</option><option value="mealy">Mealy machine</option></select>
+          </label>
+          <div class="analysis-actions"><button id="automata-convert" type="button">Convert machine</button></div>
+        </div>
+        <div class="analysis-muted" id="automata-convert-note">DFA/NFA transitions use input labels. Moore states use <code>state/output</code>; Mealy arrows use <code>input/output</code> (comma-separated alternatives). Moore/Mealy → NFA goes through a right-linear grammar; <code>ε</code> productions mark accepting states. DFA conversion determinizes that NFA. Because Moore and Mealy machines are deterministic, their converted NFA may have the same transitions and states as the DFA. Mealy → DFA/NFA keeps the input alphabet and accepts when the final transition outputs <code>accept</code>.</div>
         <hr class="analysis-separator" />
         <h3>Finite automaton → grammar</h3>
         <div class="analysis-actions"><button id="automata-to-grammar" type="button">Show regular CFG</button></div>
         <div class="analysis-muted">Creates an equivalent right-linear grammar (a regular subset of CFGs) from the current FSM.</div>
         <pre class="analysis-grammar" id="automata-grammar" hidden></pre>
+        <div class="analysis-actions"><button id="automata-to-regex-python" type="button">Show Python-style regex</button><button id="automata-to-regex-theory" type="button">Show formal-theory regex</button></div>
+        <div class="analysis-muted">Converts the accepted input language using state elimination. Python-style uses <code>|</code> for union; formal-theory uses <code>+</code> and <code>epsilon</code>. For Mealy machines, the final transition output <code>accept</code> determines acceptance.</div>
         <hr class="analysis-separator" />
-        <div class="analysis-muted">Lean checks the current graph's state, transition, determinism, and completeness invariants through PyPantograph. Install both optional integrations with <code>python -m pip install -r requirements.txt</code>. CFG → PDA is the general direction; arbitrary CFGs cannot be converted to finite automata.</div>
+        <div class="analysis-muted">Lean checks DFA/NFA invariants. Moore/Mealy checking converts through a right-linear grammar; its <code>ε</code> productions mark accepting states. Mealy's final transition output <code>accept</code> determines acceptance. It does not prove conversion semantics. Install optional Lean support with <code>python -m pip install -r requirements-lean.txt</code>. CFG → PDA is the general direction; arbitrary CFGs cannot be converted to finite automata.</div>
       </aside>
     </main>
 

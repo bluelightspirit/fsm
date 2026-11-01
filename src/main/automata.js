@@ -1,4 +1,4 @@
-// DFA/NFA analysis and NFA subset construction for the current canvas graph.
+// DFA/NFA/Moore/Mealy analysis and conversion for the current canvas graph.
 var automataPanelSignature = "";
 var automataPanelWorkspaceId = null;
 var automataStatusMessage = "";
@@ -11,7 +11,30 @@ function automataSplitLabel(label) {
   return String(label || "").split(",").map(function (part) { return part.trim(); }).filter(Boolean);
 }
 
+function automataGrammarVariable(index) {
+  var subscripts = "₀₁₂₃₄₅₆₇₈₉";
+  return "Q" + String(index).replace(/[0-9]/g, function (digit) { return subscripts[Number(digit)]; });
+}
+
+function automataSelectedType() {
+  var select = document.getElementById("automata-type");
+  return select ? select.value : "dfa";
+}
+
+function automataTransitionParts(raw, type) {
+  var text = String(raw || "");
+  if (type !== "mealy") return { symbol: text.trim(), output: "" };
+  var slash = text.indexOf("/");
+  return slash < 0 ? { symbol: text.trim(), output: "" } : { symbol: text.slice(0, slash).trim(), output: text.slice(slash + 1).trim() };
+}
+
+function automataMooreParts(raw) {
+  var text = String(raw || ""), slash = text.lastIndexOf("/");
+  return slash < 0 ? { name: text.trim(), output: "" } : { name: text.slice(0, slash).trim(), output: text.slice(slash + 1).trim() };
+}
+
 function automataBuildModel() {
+  var type = automataSelectedType();
   var nodeIds = new Map();
   nodes.forEach(function (node, i) { nodeIds.set(node, i); });
   var edges = [], starts = [];
@@ -31,11 +54,15 @@ function automataBuildModel() {
   });
   var inferred = [];
   edges.forEach(function (edge) {
-    if (edge.symbol && !automataEpsilon(edge.symbol) && inferred.indexOf(edge.symbol) < 0) inferred.push(edge.symbol);
+    var parts = automataTransitionParts(edge.symbol, type), symbol = parts.symbol;
+    if (symbol && !automataEpsilon(symbol) && inferred.indexOf(symbol) < 0) inferred.push(symbol);
   });
   inferred.sort();
   return {
-    nodes: nodes.map(function (node, i) { return { id: i, name: node.text || "q" + i, accepting: !!node.isAcceptState }; }),
+    nodes: nodes.map(function (node, i) {
+      var moore = type === "moore" ? automataMooreParts(node.text || "q" + i) : { name: node.text || "q" + i, output: "" };
+      return { id: i, name: moore.name || "q" + i, output: moore.output, accepting: !!node.isAcceptState };
+    }),
     starts: starts,
     accepts: nodes.map(function (node, i) { return node.isAcceptState ? i : -1; }).filter(function (i) { return i >= 0; }),
     edges: edges,
@@ -52,35 +79,39 @@ function automataAlphabet(model) {
 
 function automataAnalyze(model, type, alphabet) {
   var errors = [], warnings = [], n = model.nodes.length;
+  var deterministicType = type === "dfa" || type === "moore" || type === "mealy";
   if (!n) errors.push("Add at least one state.");
   if (!model.starts.length) errors.push("No start arrow is assigned.");
-  if (model.starts.length > 1) errors.push("There are " + model.starts.length + " start arrows; a DFA/NFA has one start state.");
-  if (!model.accepts.length) warnings.push("No accepting states: the machine accepts the empty language.");
+  if (model.starts.length > 1) errors.push("There are " + model.starts.length + " start arrows; this machine type requires exactly one start state.");
+  if ((type === "dfa" || type === "nfa") && !model.accepts.length) warnings.push("No accepting states: the machine accepts the empty language.");
   var epsilonCount = 0, emptyLabels = 0, invalidTargets = 0;
   var targets = new Map(), adjacency = Array.from({ length: n }, function () { return []; });
   model.edges.forEach(function (edge) {
     if (edge.from == null || edge.to == null || edge.from < 0 || edge.to < 0 || edge.from >= n || edge.to >= n) { invalidTargets++; return; }
-    if (!edge.symbol) { emptyLabels++; return; }
-    if (automataEpsilon(edge.symbol)) epsilonCount++;
-    var key = edge.from + "\u0000" + edge.symbol;
+    var parts = automataTransitionParts(edge.symbol, type);
+    if (!parts.symbol || (type === "mealy" && !parts.output)) { emptyLabels++; return; }
+    if (automataEpsilon(parts.symbol)) epsilonCount++;
+    var key = edge.from + "\u0000" + parts.symbol;
     if (!targets.has(key)) targets.set(key, new Set());
-    targets.get(key).add(edge.to);
-    adjacency[edge.from].push({ to: edge.to, symbol: edge.symbol });
+    targets.get(key).add(type === "mealy" ? edge.to + "\u0001" + parts.output : edge.to);
+    adjacency[edge.from].push({ to: edge.to, symbol: parts.symbol });
   });
   if (invalidTargets) errors.push(invalidTargets + " transition(s) point to a state that is no longer in the diagram.");
-  if (emptyLabels) errors.push(emptyLabels + " transition(s) have no input symbol.");
-  if (type === "dfa" && epsilonCount) errors.push("A DFA cannot contain ε-transitions (" + epsilonCount + " found).");
+  if (emptyLabels) errors.push(type === "mealy" ? emptyLabels + " transition(s) need input/output labels, such as a/accept." : emptyLabels + " transition(s) have no input symbol.");
+  if (type !== "nfa" && epsilonCount) errors.push("" + type.toUpperCase() + " machines cannot contain ε-transitions (" + epsilonCount + " found).");
+  if (type === "moore" && model.nodes.some(function (node) { return !node.output; })) errors.push("Each Moore state needs an output in its label, such as q0/accept.");
   var alphabetSet = new Set(alphabet), outsideAlphabet = [];
   model.edges.forEach(function (edge) {
-    if (edge.symbol && !automataEpsilon(edge.symbol) && !alphabetSet.has(edge.symbol) && outsideAlphabet.indexOf(edge.symbol) < 0) outsideAlphabet.push(edge.symbol);
+    var symbol = automataTransitionParts(edge.symbol, type).symbol;
+    if (symbol && !automataEpsilon(symbol) && !alphabetSet.has(symbol) && outsideAlphabet.indexOf(symbol) < 0) outsideAlphabet.push(symbol);
   });
   if (outsideAlphabet.length) errors.push("Transition symbols outside the selected alphabet: " + outsideAlphabet.join(", ") + ".");
   var duplicateTransitions = [];
   targets.forEach(function (destinations, key) {
-    if (destinations.size > 1) duplicateTransitions.push(key.split("\u0000")[0] + ": " + Array.from(destinations).map(function (i) { return model.nodes[i].name; }).join(" / "));
+    if (destinations.size > 1) duplicateTransitions.push(key.split("\u0000")[0] + (type === "mealy" ? ": multiple outputs/destinations" : ": " + Array.from(destinations).map(function (i) { return model.nodes[i].name; }).join(" / ")));
   });
   var deterministic = duplicateTransitions.length === 0 && epsilonCount === 0;
-  if (type === "dfa" && duplicateTransitions.length) errors.push("DFA is nondeterministic for " + duplicateTransitions.length + " state/symbol pair(s).");
+  if (deterministicType && duplicateTransitions.length) errors.push(type.toUpperCase() + " is nondeterministic for " + duplicateTransitions.length + " state/symbol pair(s).");
   if (!alphabet.length && n) warnings.push("No input symbols are defined. Enter an alphabet above or add labeled arrows.");
   var missing = [];
   model.nodes.forEach(function (node) {
@@ -89,8 +120,8 @@ function automataAnalyze(model, type, alphabet) {
       if (!destinations || destinations.size === 0) missing.push(node.name + " — " + symbol);
     });
   });
-  if (type === "dfa") {
-    if (missing.length) errors.push("DFA is incomplete: " + missing.length + " transition(s) are missing.");
+  if (deterministicType) {
+    if (missing.length) errors.push(type.toUpperCase() + " is incomplete: " + missing.length + " transition(s) are missing.");
   }
   var reachable = new Set();
   var queue = model.starts.slice();
@@ -104,7 +135,9 @@ function automataAnalyze(model, type, alphabet) {
   if (unreachable.length) warnings.push("Unreachable states: " + unreachable.join(", ") + ".");
   var reverse = Array.from({ length: n }, function () { return []; });
   adjacency.forEach(function (list, from) { list.forEach(function (edge) { reverse[edge.to].push(from); }); });
-  var canAccept = new Set(), back = model.accepts.slice();
+  var acceptanceStates = type === "moore" ? model.nodes.filter(function (node) { return node.output === "accept"; }).map(function (node) { return node.id; }) :
+    type === "mealy" ? model.edges.filter(function (edge) { return automataTransitionParts(edge.symbol, type).output === "accept"; }).map(function (edge) { return edge.from; }) : model.accepts.slice();
+  var canAccept = new Set(), back = acceptanceStates;
   while (back.length) {
     var accepted = back.shift();
     if (canAccept.has(accepted) || accepted < 0 || accepted >= n) continue;
@@ -146,6 +179,15 @@ function refreshAutomataPanel(force) {
   if (!force && signature === automataPanelSignature) return;
   automataPanelSignature = signature;
   var mode = document.getElementById("automata-type").value;
+  var leanButton = document.getElementById("automata-lean");
+  if (leanButton) {
+    leanButton.disabled = false;
+    leanButton.title = mode === "mealy"
+      ? "Lean checks the DFA structure with final Mealy output 'accept' treated as acceptance; it does not prove conversion semantics."
+      : mode === "moore"
+        ? "Lean checks the DFA structure derived from Moore outputs, with 'accept' states accepting; it does not prove conversion semantics."
+      : "Check the current machine's structural invariants with Lean.";
+  }
   var alpha = automataAlphabet(model);
   var report = automataAnalyze(model, mode, alpha);
   var summary = document.getElementById("automata-summary"), results = document.getElementById("automata-results");
@@ -164,69 +206,210 @@ function refreshAutomataPanel(force) {
   if (automataStatusMessage) automataAddResult(results, automataStatusMessage, automataStatusMessage.indexOf("verified") >= 0 ? "ok" : "");
 }
 
-function automataConvertNfaToDfa() {
-  var model = automataBuildModel(), alphabet = automataAlphabet(model);
-  var report = automataAnalyze(model, "nfa", alphabet);
-  if (!report.valid) { automataStatusMessage = "Fix validation errors before converting."; refreshAutomataPanel(true); return; }
-  if (!model.starts.length) return;
-  function closure(seed) {
-    var result = new Set(seed), queue = seed.slice();
-    while (queue.length) {
-      var state = queue.shift();
-      model.edges.forEach(function (edge) {
-        if (edge.from === state && automataEpsilon(edge.symbol) && !result.has(edge.to)) { result.add(edge.to); queue.push(edge.to); }
-      });
-    }
-    return result;
-  }
-  function key(set) { return Array.from(set).sort(function (a, b) { return a - b; }).join(","); }
-  var initial = closure([model.starts[0]]), subsets = [initial], byKey = new Map([[key(initial), 0]]), transitions = [], cursor = 0;
-  while (cursor < subsets.length) {
-    var fromSet = subsets[cursor];
-    alphabet.forEach(function (symbol) {
-      var destinations = new Set();
-      fromSet.forEach(function (state) {
-        model.edges.forEach(function (edge) { if (edge.from === state && edge.symbol === symbol) destinations.add(edge.to); });
-      });
-      var target = closure(Array.from(destinations)), targetKey = key(target);
-      if (!byKey.has(targetKey)) {
-        if (subsets.length >= 256) throw new Error("Subset construction exceeded 256 DFA states; conversion stopped.");
-        byKey.set(targetKey, subsets.length); subsets.push(target);
+function automataAcceptorFromModel(model, type, alphabet) {
+  var transitions = model.edges.map(function (edge) {
+    var parts = automataTransitionParts(edge.symbol, type);
+    return { from: edge.from, to: edge.to, symbol: parts.symbol, output: parts.output };
+  });
+  if (type === "nfa") {
+    var epsilonEdges = transitions.filter(function (edge) { return automataEpsilon(edge.symbol); });
+    function closure(seed) {
+      var set = new Set(seed), queue = seed.slice();
+      while (queue.length) {
+        var q = queue.shift();
+        epsilonEdges.forEach(function (edge) { if (edge.from === q && !set.has(edge.to)) { set.add(edge.to); queue.push(edge.to); } });
       }
-      transitions.push({ from: cursor, to: byKey.get(targetKey), symbol: symbol });
+      return Array.from(set).sort(function (a, b) { return a - b; });
+    }
+    function setKey(set) { return set.join(","); }
+    var subsets = [closure(model.starts)], subsetIds = new Map([[setKey(subsets[0]), 0]]), dfaEdges = [], cursor = 0;
+    while (cursor < subsets.length) {
+      var current = subsets[cursor];
+      alphabet.forEach(function (symbol) {
+        var moved = new Set();
+        current.forEach(function (q) { transitions.forEach(function (edge) { if (edge.from === q && edge.symbol === symbol) moved.add(edge.to); }); });
+        var target = closure(Array.from(moved)), key = setKey(target);
+        if (!subsetIds.has(key)) {
+          if (subsets.length >= 256) throw new Error("Subset construction exceeded 256 states; conversion stopped.");
+          subsetIds.set(key, subsets.length); subsets.push(target);
+        }
+        dfaEdges.push({ from: cursor, to: subsetIds.get(key), symbol: symbol });
+      });
+      cursor++;
+    }
+    return {
+      nodes: subsets.map(function (set, id) { return { id: id, name: "q" + id, accepting: set.some(function (q) { return model.nodes[q].accepting; }) }; }),
+      starts: [0], accepts: subsets.map(function (set, id) { return set.some(function (q) { return model.nodes[q].accepting; }) ? id : -1; }).filter(function (id) { return id >= 0; }),
+      edges: dfaEdges, alphabet: alphabet,
+    };
+  }
+  if (type === "mealy") {
+    var map = new Map(), states = [], edgesOut = [], nameCounts = new Map();
+    function getState(q, accepts) {
+      var key = q + ":" + (accepts ? "1" : "0");
+      if (!map.has(key)) {
+        if (states.length >= 512) throw new Error("Mealy conversion exceeded 512 states; conversion stopped.");
+        var baseName = model.nodes[q].name, copy = nameCounts.get(baseName) || 0;
+        nameCounts.set(baseName, copy + 1);
+        map.set(key, states.length); states.push({ q: q, accepting: accepts, name: baseName + (copy ? "′" + (copy + 1) : "") });
+      }
+      return map.get(key);
+    }
+    var initial = getState(model.starts[0], false), cursor = 0;
+    while (cursor < states.length) {
+      var current = states[cursor];
+      transitions.forEach(function (edge) {
+        if (edge.from !== current.q || automataEpsilon(edge.symbol)) return;
+        var target = getState(edge.to, edge.output === "accept");
+        edgesOut.push({ from: cursor, to: target, symbol: edge.symbol });
+      });
+      cursor++;
+    }
+    return { nodes: states.map(function (state, id) { return { id: id, name: state.name, accepting: state.accepting }; }),
+      starts: [initial], accepts: states.map(function (state, id) { return state.accepting ? id : -1; }).filter(function (id) { return id >= 0; }),
+      edges: edgesOut, alphabet: alphabet };
+  }
+
+  var nodes = model.nodes.map(function (node, id) {
+    var accepting = type === "moore" ? node.output === "accept" : node.accepting;
+    return { id: id, name: node.name, accepting: accepting };
+  });
+  if (type === "moore") {
+    return { nodes: nodes, starts: model.starts.slice(), accepts: nodes.filter(function (node) { return node.accepting; }).map(function (node) { return node.id; }),
+      edges: transitions.map(function (edge) { return { from: edge.from, to: edge.to, symbol: edge.symbol }; }), alphabet: alphabet };
+  }
+  return { nodes: nodes, starts: model.starts.slice(), accepts: model.accepts.slice(),
+    edges: transitions.map(function (edge) { return { from: edge.from, to: edge.to, symbol: edge.symbol }; }), alphabet: alphabet };
+}
+
+// Shared right-linear grammar representation. Moore outputs mark accepting
+// states; Mealy terminals preserve input/output traces as pair symbols.
+function automataBuildType3Grammar(model, type) {
+  var rules = [], terminals = [], stateCount = model.nodes.length;
+  var start = model.starts[0];
+  function addTerminal(from, to, symbol) {
+    rules.push({ from: from, to: to, symbol: symbol });
+    if (symbol && terminals.indexOf(symbol) < 0) terminals.push(symbol);
+  }
+  model.edges.forEach(function (edge) {
+    var parts = automataTransitionParts(edge.symbol, type), terminal = parts.symbol;
+    if (type === "mealy") terminal += "/" + parts.output;
+    if (type === "nfa" && automataEpsilon(parts.symbol)) terminal = "";
+    addTerminal(edge.from, edge.to, terminal);
+  });
+  if (type === "mealy") {
+    model.nodes.forEach(function (node) { addTerminal(node.id, null, ""); });
+  } else if (type === "moore") {
+    model.nodes.filter(function (node) { return node.output === "accept"; }).forEach(function (node) { addTerminal(node.id, null, ""); });
+  } else {
+    model.accepts.forEach(function (state) { addTerminal(state, null, ""); });
+  }
+  rules.sort(function (a, b) { return a.from - b.from || a.symbol.localeCompare(b.symbol) || (a.to == null ? -1 : a.to) - (b.to == null ? -1 : b.to); });
+  return { stateCount: stateCount, start: start, freshStart: false, stateNames: model.nodes.map(function (node, id) { return node.name || "q_" + id; }), rules: rules, terminals: terminals.sort() };
+}
+
+function automataType3GrammarToNfa(grammar) {
+  // A → aB becomes an a-edge; A → ε marks the variable-state accepting.
+  var accepting = new Set(grammar.rules.filter(function (rule) { return rule.to == null && !rule.symbol; }).map(function (rule) { return rule.from; }));
+  var edges = grammar.rules.filter(function (rule) { return rule.to != null; }).map(function (rule) {
+    return { from: rule.from, to: rule.to, symbol: rule.symbol || "ε" };
+  });
+  return {
+    nodes: Array.from({ length: grammar.stateCount }, function (_, id) { return { id: id, name: grammar.freshStart && id === grammar.start ? "S" : grammar.stateNames[id] || "q_" + id, accepting: accepting.has(id) }; }),
+    starts: [grammar.start], accepts: Array.from(accepting).sort(function (a, b) { return a - b; }), edges: edges, alphabet: grammar.terminals,
+  };
+}
+
+function automataType3GrammarToDfa(grammar) {
+  return automataAcceptorFromModel(automataType3GrammarToNfa(grammar), "nfa", grammar.terminals);
+}
+
+// Convert Moore/Mealy acceptor semantics through a right-linear Type 3 grammar.
+function automataOutputMachineToNfa(model, type, alphabet) {
+  var acceptor = type === "mealy" ? automataAcceptorFromModel(model, "mealy", alphabet) : model;
+  var grammar = automataBuildType3Grammar(acceptor, type === "moore" ? "moore" : "dfa");
+  var nfa = automataType3GrammarToNfa(grammar);
+  nfa.alphabet = grammar.terminals;
+  return { grammar: grammar, nfa: nfa };
+}
+
+function automataMealyToMoore(model, alphabet) {
+  var transitions = model.edges.map(function (edge) {
+    var parts = automataTransitionParts(edge.symbol, "mealy");
+    return { from: edge.from, to: edge.to, symbol: parts.symbol, output: parts.output };
+  });
+  var ids = new Map(), states = [], edges = [];
+  function stateFor(q, output) {
+    var key = q + "\u0000" + output;
+    if (!ids.has(key)) {
+      if (states.length >= 512) throw new Error("Mealy-to-Moore conversion exceeded 512 states; conversion stopped.");
+      ids.set(key, states.length); states.push({ q: q, output: output, name: model.nodes[q].name + " / " + output });
+    }
+    return ids.get(key);
+  }
+  var start = stateFor(model.starts[0], "∅"), cursor = 0;
+  while (cursor < states.length) {
+    var current = states[cursor];
+    transitions.forEach(function (edge) {
+      if (edge.from !== current.q) return;
+      edges.push({ from: cursor, to: stateFor(edge.to, edge.output), symbol: edge.symbol });
     });
     cursor++;
   }
-  var groups = new Map();
-  transitions.forEach(function (edge) {
-    var groupKey = edge.from + ":" + edge.to;
-    if (!groups.has(groupKey)) groups.set(groupKey, { from: edge.from, to: edge.to, symbols: [] });
-    groups.get(groupKey).symbols.push(edge.symbol);
+  return { nodes: states.map(function (state, id) { return { id: id, name: state.name, accepting: false }; }), starts: [start], accepts: [], edges: edges, alphabet: alphabet };
+}
+
+function automataMooreToMealy(model, alphabet) {
+  var edges = model.edges.map(function (edge) {
+    var parts = automataTransitionParts(edge.symbol, "moore");
+    return { from: edge.from, to: edge.to, symbol: parts.symbol + "/" + model.nodes[edge.to].output };
   });
-  var newNodes = subsets.map(function (set) {
-    var members = Array.from(set).sort(function (a, b) { return a - b; });
-    return { text: members.length ? "{" + members.map(function (i) { return model.nodes[i].name; }).join(",") + "}" : "∅", isAcceptState: members.some(function (i) { return model.nodes[i].accepting; }) };
-  });
-  var width = pageWidthPx(), height = pageHeightPx(), cx = width / 2, cy = height / 2;
-  var radius = Math.max(0, Math.min(width * 0.34, height * 0.34, 260));
-  newNodes.forEach(function (node, i) {
-    var angle = -Math.PI / 2 + 2 * Math.PI * i / Math.max(1, newNodes.length);
-    node.x = cx + radius * Math.cos(angle); node.y = cy + radius * Math.sin(angle);
-  });
-  var newLinks = [];
-  newNodes.forEach(function (_, i) { if (i === 0) newLinks.push({ type: "StartLink", node: i, text: "" }); });
-  groups.forEach(function (group) {
-    var text = group.symbols.join(",");
-    if (group.from === group.to) newLinks.push({ type: "SelfLink", node: group.from, text: text, anchorAngle: -Math.PI / 2 });
-    else newLinks.push({ type: "Link", nodeA: group.from, nodeB: group.to, text: text, parallelPart: 0.5, perpendicularPart: 0, curvePoints: null });
-  });
-  flushHistory(); saveBackup();
-  var baseName = Workspace.getActive() ? Workspace.getActive().name : "NFA";
-  var newId = Workspace.create("DFA from " + baseName);
-  Workspace.switchTo(newId);
-  var data = { nodes: newNodes, links: newLinks, style: getStyle(), pages: pageCount, pageSize: pageSizeKey, margins: pageMarginsForExport(), constrainToMargins: constrainToMargins };
-  Workspace.saveActive(data); deserializeState(data); History.reset(snapshotJSON()); draw();
-  automataStatusMessage = "Created a DFA with " + subsets.length + " subset state(s) in the workspace.";
+  return { nodes: model.nodes.map(function (node) { return { id: node.id, name: node.name, accepting: false }; }),
+    starts: model.starts.slice(), accepts: [], edges: edges, alphabet: alphabet };
+}
+
+function automataConvertMachine() {
+  var model = automataBuildModel(), source = automataSelectedType();
+  var target = document.getElementById("automata-convert-target").value, alphabet = automataAlphabet(model);
+  var report = automataAnalyze(model, source, alphabet);
+  if (!report.valid) { automataStatusMessage = "Fix validation errors before converting."; refreshAutomataPanel(true); return; }
+  var result, emptyWordAccepted = false;
+  if (source === "mealy" && target === "moore") result = automataMealyToMoore(model, alphabet);
+  else if (source === "moore" && target === "mealy") result = automataMooreToMealy(model, alphabet);
+  else if (source === target) result = {
+    nodes: model.nodes.map(function (node) { return { id: node.id, name: source === "moore" ? node.name + " / " + node.output : node.name, accepting: node.accepting }; }),
+    starts: model.starts.slice(), accepts: model.accepts.slice(),
+    edges: model.edges.map(function (edge) { var p = automataTransitionParts(edge.symbol, source); return { from: edge.from, to: edge.to, symbol: source === "mealy" ? p.symbol + "/" + p.output : p.symbol }; }),
+    alphabet: alphabet,
+  };
+  else if ((source === "moore" || source === "mealy") && (target === "dfa" || target === "nfa")) {
+    var regular = automataOutputMachineToNfa(model, source, alphabet);
+    result = target === "nfa" ? regular.nfa : automataAcceptorFromModel(regular.nfa, "nfa", regular.grammar.terminals);
+  } else {
+    var acceptor = automataAcceptorFromModel(model, source, alphabet);
+    emptyWordAccepted = acceptor.accepts.indexOf(acceptor.starts[0]) >= 0;
+    if (target === "nfa" || target === "dfa") result = acceptor;
+    else if (target === "moore") {
+      result = { nodes: acceptor.nodes.map(function (node) { return { id: node.id, name: node.name + " / " + (node.accepting ? "accept" : "reject"), accepting: false }; }),
+        starts: acceptor.starts, accepts: [], edges: acceptor.edges, alphabet: alphabet };
+    } else {
+      result = { nodes: acceptor.nodes.map(function (node) { return { id: node.id, name: node.name, accepting: false }; }),
+        starts: acceptor.starts, accepts: [],
+        edges: acceptor.edges.map(function (edge) { var dest = acceptor.nodes[edge.to]; return { from: edge.from, to: edge.to, symbol: edge.symbol + "/" + (dest.accepting ? "accept" : "reject") }; }), alphabet: alphabet };
+    }
+  }
+  result.type = target;
+  var labels = { dfa: "DFA", nfa: "NFA", moore: "Moore machine", mealy: "Mealy machine" };
+  automataCreateWorkspace(labels[target] + " from " + labels[source], result, result.alphabet || alphabet);
+  var note = "Created a " + labels[target] + " in the workspace.";
+  if (source === "mealy" && (target === "dfa" || target === "nfa")) note += " Converted through a right-linear Type 3 grammar over the input alphabet; its ε-productions mark accepting states. An 'accept' output on the final transition makes the state accepting; the empty word is rejected.";
+  if (source === "moore" && (target === "dfa" || target === "nfa")) note += " Converted through a right-linear Type 3 grammar; Moore states outputting 'accept' produce ε and become accepting states.";
+  if ((source === "moore" || source === "mealy") && target === "nfa") note += " (For a deterministic source, the resulting NFA may be identical to the DFA.)";
+  if (source === "mealy" && target === "moore") note += " Moore's start state is labeled ∅ because Mealy machines emit no initial output.";
+  if (source === "moore" && target === "mealy") note += " The initial Moore output has no matching Mealy transition, so only outputs produced after input symbols are preserved.";
+  if ((source === "dfa" || source === "nfa") && (target === "moore" || target === "mealy")) note += " Outputs are 'accept' or 'reject' according to the acceptor state after each input.";
+  if (target === "mealy" && emptyWordAccepted) note += " The source accepts the empty word, which a Mealy machine cannot represent because it emits no output before input.";
+  automataStatusMessage = note;
   refreshAutomataPanel(true);
 }
 
@@ -238,8 +421,8 @@ function automataCreateWorkspace(name, generated, alphabet) {
   var generatedPages = Math.max(1, Math.ceil(count / perPage));
   var radius = nodeRadius;
 
-  // Preserve Pyformlang's construction order. Its state IDs are qN, and
-  // numeric ordering keeps the Thompson-NFA chains and branches local.
+  // Preserve generated state numbering; numeric ordering keeps Thompson-NFA
+  // chains and branches local in the diagram.
   var stateOrder = generated.nodes.map(function (_, i) { return i; });
   stateOrder.sort(function (a, b) {
     var an = String(generated.nodes[a].name || "q" + a), bn = String(generated.nodes[b].name || "q" + b);
@@ -382,15 +565,19 @@ function automataCreateWorkspace(name, generated, alphabet) {
   });
   flushHistory(); saveBackup();
   var newId = Workspace.create(name);
+  var generatedType = generated.type || "nfa", generatedAlphabet = alphabet || [];
+  try {
+    localStorage.setItem("fsm-automata-type-" + newId, generatedType);
+    localStorage.setItem("fsm-automata-alphabet-" + newId, generatedAlphabet.join(", "));
+  } catch (e) {}
   Workspace.switchTo(newId);
   var data = { nodes: generatedNodes, links: generatedLinks, style: getStyle(), pages: generatedPages,
     pageSize: pageSizeKey, margins: pageMarginsForExport(), constrainToMargins: constrainToMargins };
   Workspace.saveActive(data); deserializeState(data);
   History.reset(snapshotJSON()); draw();
-  try {
-    localStorage.setItem("fsm-automata-type-" + newId, generated.type || "nfa");
-    localStorage.setItem("fsm-automata-alphabet-" + newId, (alphabet || []).join(", "));
-  } catch (e) {}
+  var typeSelect = document.getElementById("automata-type"), alphabetInput = document.getElementById("automata-alphabet");
+  if (typeSelect) typeSelect.value = generatedType;
+  if (alphabetInput) alphabetInput.value = generatedAlphabet.join(", ");
   automataStatusMessage = "Created " + name + " with " + generatedNodes.length + " states in the workspace.";
   refreshAutomataPanel(true);
 }
@@ -437,11 +624,11 @@ function ensureRegexLeanButton(syntaxSelect) {
     var modeSelect = document.getElementById("automata-regex-mode");
     var syntax = syntaxSelect.value;
     var mode = modeSelect ? modeSelect.value : "nfa";
-    var supported = syntax === "theory";
+    var supported = syntax === "theory" && (mode === "nfa" || mode === "dfa");
     btn.disabled = !supported;
     btn.title = supported
       ? "Check that Python and Lean agree exactly on this construction (\u03b5-NFA, plus the DFA step when DFA output is selected)"
-      : "Lean verification currently only covers the formal (theory) syntax";
+      : "Regex-construction verification supports only formal syntax with ε-NFA or DFA output";
   }
   syntaxSelect.addEventListener("change", sync);
   var modeSelect = document.getElementById("automata-regex-mode");
@@ -493,32 +680,230 @@ function automataGenerateRegex() {
     .then(function (generated) {
       var tag = generated.experimental ? " [experimental formal-theory]" : " [python-style]";
       automataCreateWorkspace("From regex: " + expression + tag, generated, generated.alphabet);
+      if (generated.type === "mealy" && generated.emptyWordAccepted) {
+        automataStatusMessage = "Created the Mealy machine, but it cannot represent acceptance of the empty word because it emits no output before input.";
+        refreshAutomataPanel(true);
+      }
     })
     .catch(function (error) { automataStatusMessage = error.message; refreshAutomataPanel(true); })
     .finally(function () { button.disabled = false; });
 }
 
 function automataShowRegularGrammar() {
-  var model = automataBuildModel(), output = document.getElementById("automata-grammar");
+  var machineType = automataSelectedType(), model = automataBuildModel(), output = document.getElementById("automata-grammar");
+  var grammarReport = automataAnalyze(model, machineType, automataAlphabet(model));
+  if (machineType === "mealy") {
+    var mealyReport = automataAnalyze(model, machineType, automataAlphabet(model));
+    if (!mealyReport.valid) {
+      automataStatusMessage = "Cannot display a deterministic Mealy trace grammar while the machine is invalid: " + mealyReport.errors.join(" ");
+      output.hidden = true;
+      refreshAutomataPanel(true); return;
+    }
+  }
+  if (machineType === "moore" && model.nodes.some(function (node) { return !node.output; })) { automataStatusMessage = "Give every Moore state an output before converting."; refreshAutomataPanel(true); return; }
+  if (machineType === "mealy" && model.edges.some(function (edge) { var p = automataTransitionParts(edge.symbol, machineType); return !p.symbol || !p.output; })) { automataStatusMessage = "Give every Mealy arrow an input/output label before converting."; refreshAutomataPanel(true); return; }
   if (model.nodes.length === 0 || model.starts.length !== 1) {
     automataStatusMessage = "A regular grammar needs at least one state and exactly one start arrow.";
     refreshAutomataPanel(true); return;
   }
-  var alternatives = model.nodes.map(function () { return []; });
+  var grammar = automataBuildType3Grammar(model, machineType);
   var hasUnlabeled = model.edges.some(function (edge) { return !edge.symbol; });
   if (hasUnlabeled) {
     automataStatusMessage = "Add an input symbol to every arrow before converting this FSM to a grammar.";
     refreshAutomataPanel(true); return;
   }
-  model.edges.forEach(function (edge) {
-    if (!edge.symbol || edge.from == null || edge.to == null || !alternatives[edge.from] || !alternatives[edge.to]) return;
-    if (automataEpsilon(edge.symbol)) alternatives[edge.from].push("Q" + edge.to);
-    else alternatives[edge.from].push(edge.symbol + " Q" + edge.to);
+  var reachable = new Set([grammar.start]), queue = [grammar.start];
+  while (queue.length) {
+    var current = queue.shift();
+    grammar.rules.forEach(function (rule) {
+      if (rule.from === current && rule.to != null && !reachable.has(rule.to)) { reachable.add(rule.to); queue.push(rule.to); }
+    });
+  }
+  var generating = new Set(grammar.rules.filter(function (rule) { return rule.to == null && !rule.symbol; }).map(function (rule) { return rule.from; }));
+  var changed = true;
+  while (changed) {
+    changed = false;
+    grammar.rules.forEach(function (rule) {
+      if (rule.to != null && generating.has(rule.to) && !generating.has(rule.from)) { generating.add(rule.from); changed = true; }
+    });
+  }
+  var keptStates = Array.from(reachable).filter(function (id) { return generating.has(id); });
+  if (keptStates.indexOf(grammar.start) < 0) keptStates.push(grammar.start);
+  keptStates.sort(function (a, b) { return a - b; });
+  keptStates = [grammar.start].concat(keptStates.filter(function (id) { return id !== grammar.start; }));
+  var variableIds = new Map(keptStates.map(function (id, index) { return [id, index]; }));
+  var alternatives = keptStates.map(function () { return []; });
+  grammar.rules.forEach(function (rule) {
+    if (!variableIds.has(rule.from)) return;
+    if (rule.to == null && !rule.symbol) alternatives[variableIds.get(rule.from)].push("ε");
+    else if (rule.to != null && variableIds.has(rule.to)) {
+      alternatives[variableIds.get(rule.from)].push((rule.symbol ? rule.symbol + " " : "") + automataGrammarVariable(variableIds.get(rule.to)));
+    }
   });
-  model.accepts.forEach(function (state) { alternatives[state].push("ε"); });
-  output.textContent = alternatives.map(function (rules, i) { return "Q" + i + " → " + (rules.length ? rules.join(" | ") : "∅"); }).join("\n");
+  output.textContent = alternatives.map(function (rules, i) { return automataGrammarVariable(i) + " → " + (rules.length ? rules.join(" | ") : "∅"); }).join("\n");
   output.hidden = false;
-  automataStatusMessage = "Displayed an equivalent right-linear grammar; each Q-state corresponds to a state in this FSM.";
+    automataStatusMessage = machineType === "mealy"
+    ? "Displayed the right-linear trace grammar; each Mealy terminal is an input/output pair. Convert to DFA to get the accepted input language over the original alphabet."
+    : machineType === "moore"
+      ? "Displayed a right-linear grammar for the Moore machine's input language; states outputting 'accept' produce ε."
+      : "Displayed an equivalent right-linear grammar; each Q-state corresponds to a state in this FSM.";
+  if (machineType === "dfa" && grammarReport.dead.length) {
+    automataStatusMessage += " Removed nonaccepting dead state(s) " + grammarReport.dead.join(", ") + " and rules leading only to them; they cannot generate a terminal word.";
+  }
+  refreshAutomataPanel(true);
+}
+
+// Kleene's construction: view the right-linear grammar as its equivalent FSM,
+// add a fresh start/final pair, then eliminate the old state variables.
+function automataRegexEmpty() { return { k: "empty" }; }
+function automataRegexEps() { return { k: "eps" }; }
+function automataRegexLit(s) { return { k: "lit", s: s }; }
+function automataRegexAlt(a, b) {
+  if (a.k === "empty") return b; if (b.k === "empty" || JSON.stringify(a) === JSON.stringify(b)) return a;
+  return { k: "alt", a: a, b: b };
+}
+function automataRegexCat(a, b) {
+  if (a.k === "empty" || b.k === "empty") return automataRegexEmpty();
+  if (a.k === "eps") return b; if (b.k === "eps") return a;
+  return { k: "cat", a: a, b: b };
+}
+function automataRegexStar(a) {
+  if (a.k === "empty" || a.k === "eps") return automataRegexEps();
+  if (a.k === "star") return a;
+  return { k: "star", a: a };
+}
+function automataRegexRender(ast, syntax, parent) {
+  parent = parent || 0;
+  var prec = ast.k === "alt" ? 1 : ast.k === "cat" ? 2 : ast.k === "star" ? 3 : 4, s;
+  if (ast.k === "empty") s = "∅";
+  else if (ast.k === "eps") s = syntax === "theory" ? "ε" : "()";
+  else if (ast.k === "lit") {
+    var reserved = syntax === "theory" ? /[\\.|+*()$]/ : /[\\.^$|?*+()[\]{}]/;
+    s = reserved.test(ast.s) ? "\\" + ast.s : ast.s;
+  } else if (ast.k === "alt") s = automataRegexRender(ast.a, syntax, prec) + (syntax === "theory" ? "+" : "|") + automataRegexRender(ast.b, syntax, prec);
+  else if (ast.k === "cat") s = automataRegexRender(ast.a, syntax, prec) + automataRegexRender(ast.b, syntax, prec);
+  else s = automataRegexRender(ast.a, syntax, prec) + "*";
+  return prec < parent ? "(" + s + ")" : s;
+}
+
+function automataMinimizeDfa(model, alphabet) {
+  var n = model.nodes.length;
+  if (!n || model.starts.length !== 1) return model;
+  var transition = Array.from({ length: n }, function () { return new Map(); }), missing = false, invalid = false;
+  model.edges.forEach(function (edge) {
+    if (edge.from < 0 || edge.from >= n || edge.to < 0 || edge.to >= n) { invalid = true; return; }
+    var row = transition[edge.from], previous = row.get(edge.symbol);
+    if (previous != null && previous !== edge.to) invalid = true;
+    row.set(edge.symbol, edge.to);
+  });
+  alphabet.forEach(function (symbol) { transition.forEach(function (row) { if (!row.has(symbol)) missing = true; }); });
+  if (invalid) return model;
+  var sink = missing ? n : -1, total = n + (missing ? 1 : 0);
+  if (missing) {
+    transition.push(new Map());
+    alphabet.forEach(function (symbol) { transition[n].set(symbol, n); });
+    for (var state = 0; state < n; state++) alphabet.forEach(function (symbol) { if (!transition[state].has(symbol)) transition[state].set(symbol, sink); });
+  }
+  var reachable = new Set(), queue = [model.starts[0]];
+  while (queue.length) {
+    var current = queue.shift();
+    if (reachable.has(current) || current < 0 || current >= total) continue;
+    reachable.add(current);
+    alphabet.forEach(function (symbol) { queue.push(transition[current].get(symbol)); });
+  }
+  var accepting = new Set(model.accepts || []);
+  model.nodes.forEach(function (node, id) { if (node.accepting) accepting.add(id); });
+  var acceptingStates = [], rejectingStates = [];
+  Array.from(reachable).forEach(function (id) { (accepting.has(id) ? acceptingStates : rejectingStates).push(id); });
+  var groups = [];
+  if (acceptingStates.length) groups.push(acceptingStates);
+  if (rejectingStates.length) groups.push(rejectingStates);
+  var blockOf = new Array(total).fill(-1);
+  while (true) {
+    groups.forEach(function (group, block) { group.forEach(function (id) { blockOf[id] = block; }); });
+    var refined = [], signatures = new Map();
+    groups.forEach(function (group) {
+      group.forEach(function (id) {
+        var signature = (accepting.has(id) ? "1" : "0") + "|" + alphabet.map(function (symbol) { return blockOf[transition[id].get(symbol)]; }).join(",");
+        if (!signatures.has(signature)) { signatures.set(signature, []); refined.push(signatures.get(signature)); }
+        signatures.get(signature).push(id);
+      });
+    });
+    if (refined.length === groups.length) { groups = refined; break; }
+    groups = refined;
+  }
+  groups.forEach(function (group, block) { group.forEach(function (id) { blockOf[id] = block; }); });
+  var startBlock = blockOf[model.starts[0]], blockOrder = [startBlock], seenBlocks = new Set([startBlock]), cursor = 0;
+  while (cursor < blockOrder.length) {
+    var representative = groups[blockOrder[cursor]][0];
+    alphabet.forEach(function (symbol) {
+      var targetBlock = blockOf[transition[representative].get(symbol)];
+      if (!seenBlocks.has(targetBlock)) { seenBlocks.add(targetBlock); blockOrder.push(targetBlock); }
+    });
+    cursor++;
+  }
+  var newId = new Map(blockOrder.map(function (block, id) { return [block, id]; }));
+  var nodesOut = blockOrder.map(function (block, id) { return { id: id, name: "q" + id, accepting: accepting.has(groups[block][0]) }; });
+  var acceptsOut = nodesOut.filter(function (node) { return node.accepting; }).map(function (node) { return node.id; });
+  var edgesOut = [];
+  blockOrder.forEach(function (block, id) {
+    var representative = groups[block][0];
+    alphabet.forEach(function (symbol) { edgesOut.push({ from: id, to: newId.get(blockOf[transition[representative].get(symbol)]), symbol: symbol }); });
+  });
+  return { nodes: nodesOut, starts: [0], accepts: acceptsOut, edges: edgesOut, alphabet: alphabet.slice() };
+}
+
+function automataShowRegex(syntax) {
+  var machineType = automataSelectedType(), model = automataBuildModel(), output = document.getElementById("automata-grammar");
+  var alphabet = automataAlphabet(model);
+  if (machineType === "moore" && model.nodes.some(function (node) { return !node.output; })) { automataStatusMessage = "Give every Moore state an output before converting."; refreshAutomataPanel(true); return; }
+  if (machineType === "mealy" && model.edges.some(function (edge) { var p = automataTransitionParts(edge.symbol, machineType); return !p.symbol || !p.output; })) { automataStatusMessage = "Give every Mealy arrow an input/output label before converting."; refreshAutomataPanel(true); return; }
+  model = automataAcceptorFromModel(model, machineType, alphabet);
+  model = automataMinimizeDfa(model, alphabet);
+  if (!model.nodes.length || model.starts.length !== 1) {
+    automataStatusMessage = "A regular expression needs at least one state and exactly one start arrow.";
+    refreshAutomataPanel(true); return;
+  }
+  if (model.nodes.length > 48) {
+    automataStatusMessage = "Regex conversion is limited to 48 FSM states to keep the expression manageable.";
+    refreshAutomataPanel(true); return;
+  }
+  if (model.edges.some(function (e) { return !e.symbol || e.from == null || e.to == null; })) {
+    automataStatusMessage = "Add a symbol to every arrow before converting the grammar to a regex.";
+    refreshAutomataPanel(true); return;
+  }
+  if (model.edges.some(function (e) { return !automataEpsilon(e.symbol) && e.symbol.length !== 1; })) {
+    automataStatusMessage = "Regex conversion currently requires each input symbol to be one character.";
+    refreshAutomataPanel(true); return;
+  }
+  var n = model.nodes.length, start = n, accept = n + 1, R = Array.from({ length: n + 2 }, function () { return Array.from({ length: n + 2 }, automataRegexEmpty); });
+  R[start][model.starts[0]] = automataRegexEps();
+  model.accepts.forEach(function (q) { R[q][accept] = automataRegexEps(); });
+  model.edges.forEach(function (e) {
+    var label = automataEpsilon(e.symbol) ? automataRegexEps() : automataRegexLit(e.symbol);
+    R[e.from][e.to] = automataRegexAlt(R[e.from][e.to], label);
+  });
+  var alive = Array.from({ length: n + 2 }, function (_, i) { return i; });
+  for (var q = 0; q < n; q++) {
+    var loop = automataRegexStar(R[q][q]);
+    alive.forEach(function (i) {
+      if (i === q || R[i][q].k === "empty") return;
+      alive.forEach(function (j) {
+        if (j === q || R[q][j].k === "empty") return;
+        R[i][j] = automataRegexAlt(R[i][j], automataRegexCat(automataRegexCat(R[i][q], loop), R[q][j]));
+      });
+    });
+    alive.forEach(function (i) { R[i][q] = automataRegexEmpty(); R[q][i] = automataRegexEmpty(); });
+    alive = alive.filter(function (i) { return i !== q; });
+  }
+  var expression = automataRegexRender(R[start][accept], syntax);
+  if (expression.length > 20000) {
+    automataStatusMessage = "The equivalent regex exceeded 20,000 characters; simplify the FSM and try again.";
+    refreshAutomataPanel(true); return;
+  }
+  output.textContent = (syntax === "theory" ? "Formal theory regex: " : "Python-style regex: ") + expression;
+  output.hidden = false;
+  automataStatusMessage = "Converted the equivalent right-linear grammar to a regular expression by state elimination.";
   refreshAutomataPanel(true);
 }
 
@@ -526,6 +911,7 @@ function wireAutomataUI() {
   var mode = document.getElementById("automata-type"), alpha = document.getElementById("automata-alphabet");
   var validate = document.getElementById("automata-validate"), lean = document.getElementById("automata-lean"), convert = document.getElementById("automata-convert");
   var regexButton = document.getElementById("automata-regex-create"), grammarButton = document.getElementById("automata-to-grammar");
+  var pythonRegexButton = document.getElementById("automata-to-regex-python"), theoryRegexButton = document.getElementById("automata-to-regex-theory");
   if (!mode || mode.dataset.wired) return;
   mode.dataset.wired = "1";
   function saveSettings() {
@@ -540,19 +926,34 @@ function wireAutomataUI() {
   lean.addEventListener("click", function () {
     var model = automataBuildModel(), type = mode.value, report = automataAnalyze(model, type, automataAlphabet(model));
     if (!report.valid) { automataStatusMessage = "Resolve validation errors before Lean checking."; refreshAutomataPanel(true); return; }
+    var leanModel = model, leanType = type, leanAlphabet = report.alphabet;
+    if (type === "mealy" || type === "moore") {
+      var outputGrammar = automataOutputMachineToNfa(model, type, report.alphabet);
+      leanModel = automataAcceptorFromModel(outputGrammar.nfa, "nfa", outputGrammar.grammar.terminals);
+      leanType = "dfa";
+      leanAlphabet = outputGrammar.grammar.terminals;
+    }
     automataStatusMessage = "Checking this graph with PyPantograph…"; refreshAutomataPanel(true); lean.disabled = true;
-    fetch("/api/lean/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ automaton: model, alphabet: report.alphabet, type: type }) })
+    fetch("/api/lean/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ automaton: leanModel, alphabet: leanAlphabet, type: leanType }) })
       .then(function (response) { return response.json().then(function (body) { if (!response.ok) throw new Error(body.error || "Lean check failed"); return body; }); })
-      .then(function (body) { automataStatusMessage = body.lean && body.lean.ok ? "PyPantograph verified the Lean model." : ((body.lean && body.lean.message) || "PyPantograph could not verify this graph."); refreshAutomataPanel(true); })
+      .then(function (body) {
+        if (body.lean && body.lean.ok) automataStatusMessage = (type === "moore" || type === "mealy")
+          ? "Lean checked the DFA structure derived through the machine's right-linear Type 3 grammar; it did not prove the conversion semantics."
+          : "PyPantograph verified the Lean model.";
+        else automataStatusMessage = (body.lean && body.lean.message) || "PyPantograph could not verify this graph.";
+        refreshAutomataPanel(true);
+      })
       .catch(function (error) { automataStatusMessage = "Lean check unavailable: " + error.message; refreshAutomataPanel(true); })
       .finally(function () { lean.disabled = false; });
   });
   convert.addEventListener("click", function () {
-    try { automataConvertNfaToDfa(); }
+    try { automataConvertMachine(); }
     catch (error) { automataStatusMessage = error.message; refreshAutomataPanel(true); }
   });
   ensureRegexSyntaxSelect();
   regexButton.addEventListener("click", automataGenerateRegex);
   grammarButton.addEventListener("click", automataShowRegularGrammar);
+  pythonRegexButton.addEventListener("click", function () { automataShowRegex("python"); });
+  theoryRegexButton.addEventListener("click", function () { automataShowRegex("theory"); });
   refreshAutomataPanel(true);
 }

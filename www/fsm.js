@@ -26,6 +26,710 @@
  OTHER DEALINGS IN THE SOFTWARE.
 */
 
+function Link(a, b) {
+  this.nodeA = a;
+  this.nodeB = b;
+  this.text = "";
+  this.lineAngleAdjust = 0; // value to add to textAngle when link is straight line
+  this.labelDx = 0; // manual label offset (Alt+drag)
+  this.labelDy = 0;
+
+  // make anchor point relative to the locations of nodeA and nodeB
+  this.parallelPart = 0.5; // percentage from nodeA to nodeB
+  this.perpendicularPart = 0; // pixels from line between nodeA and nodeB
+  this.curvePoints = null; // three route handles for the whole link
+}
+
+Link.prototype._curvePageBreaks = function (start, end) {
+  var ph = typeof pageHeightPx === "function" ? pageHeightPx() : 1056;
+  var lo = Math.min(start.y, end.y), hi = Math.max(start.y, end.y);
+  var breaks = [0, 1];
+  if (Math.abs(end.y - start.y) > 1e-6) {
+    for (var y = (Math.floor(lo / ph) + 1) * ph; y < hi - 1e-6; y += ph) {
+      var t = (y - start.y) / (end.y - start.y);
+      if (t > 1e-6 && t < 1 - 1e-6) breaks.push(t);
+    }
+  }
+  breaks.sort(function (a, b) { return a - b; });
+  return breaks;
+};
+
+Link.prototype._linkCenters = function () {
+  var ph = pageHeightPx(), gap = (pageMargins.top + pageMargins.bottom) * PX_PER_INCH;
+  var reach = Math.max(nodeRadius, styleStateFontSize * 0.75) + 2;
+  function candidates(node) {
+    var out = [{ x: node.x, y: node.y }];
+    for (var p = 0; p + 1 < pageCount; p++) {
+      var nextTop = (p + 1) * ph + pageMargins.top * PX_PER_INCH;
+      var priorBottom = (p + 1) * ph - pageMargins.bottom * PX_PER_INCH;
+      if (Math.abs(node.y - nextTop) <= reach) out.push({ x: node.x, y: node.y - gap });
+      if (Math.abs(node.y - priorBottom) <= reach) out.push({ x: node.x, y: node.y + gap });
+    }
+    return out;
+  }
+  function choose(node, highY) {
+    var list = candidates(node), best = list[0];
+    for (var i = 1; i < list.length; i++) {
+      if (highY ? list[i].y > best.y : list[i].y < best.y) best = list[i];
+    }
+    return best;
+  }
+  // When either state straddles a page seam, route from the fragment on the
+  // source side toward the fragment on the destination side. This lets the
+  // curve continue across the printable-area gap instead of ending in it.
+  var down = this.nodeB.y >= this.nodeA.y;
+  var a = choose(this.nodeA, !down), b = choose(this.nodeB, down);
+  return { a: a, b: b };
+};
+
+Link.prototype._visibleCirclePoint = function (node, center, toward, inset, preferredPage) {
+  var radius = nodeRadius;
+  if (!constrainToMargins || typeof pageHeightPx !== "function" || typeof pageWidthPx !== "function") {
+    var vx = toward.x - center.x, vy = toward.y - center.y;
+    var vl = Math.sqrt(vx * vx + vy * vy) || 1;
+    return { x: center.x + vx / vl * radius, y: center.y + vy / vl * radius };
+  }
+  var ph = pageHeightPx();
+  var pad = Math.max(0, inset || 0) + Math.max(1, styleLineWidth || 1);
+  var left = pageMargins.left * PX_PER_INCH + pad;
+  var right = pageWidthPx() - pageMargins.right * PX_PER_INCH - pad;
+  var reach = Math.max(radius, styleStateFontSize * 0.75) + 2;
+  var gap = (pageMargins.top + pageMargins.bottom) * PX_PER_INCH;
+  var circleCenters = [{ x: node.x, y: node.y }];
+  for (var p = 0; p + 1 < pageCount; p++) {
+    var nextTop = (p + 1) * ph + pageMargins.top * PX_PER_INCH;
+    var priorBottom = (p + 1) * ph - pageMargins.bottom * PX_PER_INCH;
+    if (Math.abs(node.y - nextTop) <= reach) circleCenters.push({ x: node.x, y: node.y - gap });
+    if (Math.abs(node.y - priorBottom) <= reach) circleCenters.push({ x: node.x, y: node.y + gap });
+  }
+  preferredPage = preferredPage == null
+    ? Math.max(0, Math.min(pageCount - 1, Math.floor(node.y / ph)))
+    : Math.max(0, Math.min(pageCount - 1, preferredPage));
+  var best = null, bestScore = Infinity;
+  // Check every rendered fragment of a split state, preferring the fragment
+  // at the state's actual page position. That lets an arrow from page 2 attach
+  // to the visible page 1 arc instead of being stuck on its duplicate.
+  circleCenters.forEach(function (circleCenter) {
+    var page = Math.max(0, Math.min(pageCount - 1, Math.floor(circleCenter.y / ph)));
+    var top = page * ph + pageMargins.top * PX_PER_INCH + pad;
+    var bottom = (page + 1) * ph - pageMargins.bottom * PX_PER_INCH - pad;
+    var targetAngle = Math.atan2(toward.y - circleCenter.y, toward.x - circleCenter.x);
+    for (var i = 0; i < 720; i++) {
+      var angle = Math.PI * 2 * i / 720;
+      var x = circleCenter.x + Math.cos(angle) * radius, y = circleCenter.y + Math.sin(angle) * radius;
+      if (x < left || x > right || y < top || y > bottom) continue;
+      var delta = Math.atan2(Math.sin(angle - targetAngle), Math.cos(angle - targetAngle));
+      var score = Math.abs(page - preferredPage) * 100 + delta * delta;
+      if (score < bestScore) { bestScore = score; best = { x: x, y: y }; }
+    }
+  });
+  if (best) return best;
+  var dx = toward.x - center.x, dy = toward.y - center.y, length = Math.sqrt(dx * dx + dy * dy) || 1;
+  return { x: center.x + dx / length * radius, y: center.y + dy / length * radius };
+};
+
+Link.prototype._ensureCurvePoints = function (count, pageBreaks) {
+  var centers = this._linkCenters();
+  var dx = centers.b.x - centers.a.x, dy = centers.b.y - centers.a.y;
+  var length = Math.sqrt(dx * dx + dy * dy) || 1;
+  // Convert saved per-page cubic handles to three whole-link handles. This
+  // keeps imported older links editable while dropping the page-count-based UI.
+  if (Array.isArray(this.curvePoints) && this.curvePoints.length && typeof this.curvePoints[0].t !== "number") {
+    var oldBreaks = pageBreaks || this._curvePageBreaks(centers.a, centers.b);
+    var oldHandles = [];
+    this.curvePoints.forEach(function (seg, i) {
+      if (!seg || !seg.c1 || !seg.c2) return;
+      [seg.c1, seg.c2].forEach(function (point) {
+        var t0 = oldBreaks[i], t1 = oldBreaks[i + 1];
+        var px = centers.a.x + dx * (t0 + (t1 - t0) * point.parallel) - (dy / length) * point.perpendicular;
+        var py = centers.a.y + dy * (t0 + (t1 - t0) * point.parallel) + (dx / length) * point.perpendicular;
+        var t = ((px - centers.a.x) * dx + (py - centers.a.y) * dy) / (length * length);
+        var perp = (dx * (py - centers.a.y) - dy * (px - centers.a.x)) / length;
+        oldHandles.push({ t: t, perpendicular: perp });
+      });
+    });
+    oldHandles.sort(function (a, b) { return a.t - b.t; });
+    this.curvePoints = [0.25, 0.5, 0.75].map(function (target) {
+      if (!oldHandles.length) return { t: target, perpendicular: 0 };
+      var best = oldHandles[0];
+      oldHandles.forEach(function (point) { if (Math.abs(point.t - target) < Math.abs(best.t - target)) best = point; });
+      return { t: target, perpendicular: best.perpendicular };
+    });
+  }
+  if (!Array.isArray(this.curvePoints)) this.curvePoints = [];
+  if (!this.curvePoints.length) {
+    var base = this.perpendicularPart || 0;
+    this.curvePoints = [0.25, 0.5, 0.75].map(function (t) { return { t: t, perpendicular: base * (1 - Math.abs(2 * t - 1)) }; });
+  }
+};
+
+Link.prototype.getCurveHandles = function () {
+  if (!this.perpendicularPart && !this.curvePoints) return [];
+  var centers = this._linkCenters();
+  this._ensureCurvePoints();
+  var dx = centers.b.x - centers.a.x, dy = centers.b.y - centers.a.y;
+  var length = Math.sqrt(dx * dx + dy * dy) || 1;
+  return this.curvePoints.map(function (point, i) {
+    return {
+      x: centers.a.x + dx * point.t - (dy / length) * point.perpendicular,
+      y: centers.a.y + dy * point.t + (dx / length) * point.perpendicular,
+      segment: i,
+    };
+  });
+};
+
+Link.prototype.moveCurveHandle = function (handleIndex, x, y) {
+  var handles = this.getCurveHandles();
+  var handle = handles[handleIndex];
+  if (!handle) return;
+  var centers = this._linkCenters();
+  var dx = centers.b.x - centers.a.x, dy = centers.b.y - centers.a.y;
+  var length2 = dx * dx + dy * dy || 1;
+  if (typeof pageHeightPx === "function") {
+    x = Math.max(2, Math.min(pageWidthPx() - 2, x));
+    y = Math.max(2, Math.min(pageCount * pageHeightPx() - 2, y));
+  }
+  var parallel = ((x - centers.a.x) * dx + (y - centers.a.y) * dy) / length2;
+  var perpendicular = (dx * (y - centers.a.y) - dy * (x - centers.a.x)) / Math.sqrt(length2);
+  var spec = this.curvePoints[handle.segment];
+  spec.t = Math.max(-0.5, Math.min(1.5, parallel));
+  spec.perpendicular = Math.max(-pageHeightPx(), Math.min(pageHeightPx(), perpendicular));
+  this.perpendicularPart = Math.abs(spec.perpendicular) > 0.5 ? this.perpendicularPart || 1 : this.perpendicularPart;
+};
+
+Link.prototype.getAnchorPoint = function () {
+  var dx = this.nodeB.x - this.nodeA.x;
+  var dy = this.nodeB.y - this.nodeA.y;
+  var scale = Math.sqrt(dx * dx + dy * dy);
+  if (scale < 1e-6) return { x: this.nodeA.x, y: this.nodeA.y };
+  var x =
+    this.nodeA.x +
+    dx * this.parallelPart -
+    (dy * this.perpendicularPart) / scale;
+  var y =
+    this.nodeA.y +
+    dy * this.parallelPart +
+    (dx * this.perpendicularPart) / scale;
+  var padding = Math.max(2, styleLineWidth || 1);
+  var maxX = typeof pageWidthPx === "function" ? pageWidthPx() - padding : Infinity;
+  var maxY = typeof pageHeightPx === "function" && typeof pageCount !== "undefined"
+    ? pageHeightPx() * pageCount - padding
+    : Infinity;
+  return {
+    x: Math.max(padding, Math.min(maxX, x)),
+    y: Math.max(padding, Math.min(maxY, y)),
+  };
+};
+
+Link.prototype.setAnchorPoint = function (x, y) {
+  var previousPerpendicular = this.perpendicularPart;
+  var dx = this.nodeB.x - this.nodeA.x;
+  var dy = this.nodeB.y - this.nodeA.y;
+  var scale = Math.sqrt(dx * dx + dy * dy);
+  if (scale < 1e-6) return;
+  if (typeof pageWidthPx === "function" && typeof pageHeightPx === "function") {
+    x = Math.max(2, Math.min(pageWidthPx() - 2, x));
+    y = Math.max(2, Math.min(pageHeightPx() * pageCount - 2, y));
+  }
+  this.parallelPart =
+    (dx * (x - this.nodeA.x) + dy * (y - this.nodeA.y)) / (scale * scale);
+  this.perpendicularPart =
+    (dx * (y - this.nodeA.y) - dy * (x - this.nodeA.x)) / scale;
+  // Dragging the curve itself moves every page segment with the legacy anchor.
+  // Keep the whole-link handles moving with the legacy curve anchor.
+  if (Array.isArray(this.curvePoints) && this.curvePoints.length) {
+    var delta = this.perpendicularPart - previousPerpendicular;
+    this.curvePoints.forEach(function (point) { if (point && typeof point.perpendicular === "number") point.perpendicular += delta; });
+  }
+  // snap to a straight line
+  if (
+    this.parallelPart > 0 &&
+    this.parallelPart < 1 &&
+    Math.abs(this.perpendicularPart) < snapToPadding
+  ) {
+    this.lineAngleAdjust = (this.perpendicularPart < 0) * Math.PI;
+    this.perpendicularPart = 0;
+  }
+};
+
+Link.prototype.getEndPointsAndCircle = function () {
+  if (this.perpendicularPart == 0 && !this.curvePoints) {
+    var midX = (this.nodeA.x + this.nodeB.x) / 2;
+    var midY = (this.nodeA.y + this.nodeB.y) / 2;
+    var start = this.nodeA.closestPointOnCircle(midX, midY);
+    var end = this.nodeB.closestPointOnCircle(midX, midY);
+    return {
+      hasCircle: false,
+      startX: start.x,
+      startY: start.y,
+      endX: end.x,
+      endY: end.y,
+    };
+  }
+  var anchor = this.getAnchorPoint();
+  // A quadratic curve uses the dragged anchor as its control point. Unlike a
+  // circumcircle through the anchor, the curve stays inside the convex hull
+  // of its endpoints and control point, so it cannot balloon off the paper.
+  var centers = this._linkCenters();
+  var a = centers.a, b = centers.b;
+  var handles = this.getCurveHandles();
+  var first = handles[0] || anchor, last = handles[handles.length - 1] || anchor;
+  var ax = first.x - a.x, ay = first.y - a.y;
+  var bx = b.x - last.x, by = b.y - last.y;
+  var al = Math.sqrt(ax * ax + ay * ay), bl = Math.sqrt(bx * bx + by * by);
+  if (al < 1e-6) { ax = b.x - a.x; ay = b.y - a.y; al = Math.sqrt(ax * ax + ay * ay) || 1; }
+  if (bl < 1e-6) { bx = b.x - a.x; by = b.y - a.y; bl = Math.sqrt(bx * bx + by * by) || 1; }
+  var sourcePage = Math.max(0, Math.min(pageCount - 1, Math.floor(a.y / pageHeightPx())));
+  var start = this._visibleCirclePoint(this.nodeA, a, { x: a.x + ax, y: a.y + ay }, 0, sourcePage);
+  // The final route handle selects which visible copy of a split destination
+  // receives the arrowhead. Dragging that handle across a page break switches
+  // between the page fragments instead of locking the tip to the source page.
+  var targetPage = Math.max(0, Math.min(pageCount - 1, Math.floor(last.y / pageHeightPx())));
+  var end = this._visibleCirclePoint(this.nodeB, b, { x: b.x - bx, y: b.y - by }, styleArrowSize || 0, targetPage);
+  var startX = start.x, startY = start.y;
+  var endX = end.x, endY = end.y;
+  // The three route handles shape one continuous curve. Page clipping cuts
+  // that curve at printable boundaries, so the number of pages never adds dots.
+  this._ensureCurvePoints();
+  handles = this.getCurveHandles();
+  var route = [{ x: startX, y: startY }].concat(handles, [{ x: endX, y: endY }]);
+  var segments = [];
+  for (var si = 0; si < route.length - 1; si++) {
+    var previous = route[Math.max(0, si - 1)], current = route[si];
+    var next = route[si + 1], following = route[Math.min(route.length - 1, si + 2)];
+    segments.push({
+      startX: current.x, startY: current.y,
+      endX: next.x, endY: next.y,
+      control1X: current.x + (next.x - previous.x) / 6,
+      control1Y: current.y + (next.y - previous.y) / 6,
+      control2X: next.x - (following.x - current.x) / 6,
+      control2Y: next.y - (following.y - current.y) / 6,
+    });
+  }
+  return {
+    hasCircle: false,
+    hasCurve: true,
+    startX: startX,
+    startY: startY,
+    endX: endX,
+    endY: endY,
+    controlX: anchor.x,
+    controlY: anchor.y,
+    segments: segments,
+  };
+};
+
+Link.prototype.draw = function (c) {
+  var stuff = this.getEndPointsAndCircle();
+  // draw arc
+  c.beginPath();
+  if (stuff.hasCircle) {
+    c.arc(
+      stuff.circleX,
+      stuff.circleY,
+      stuff.circleRadius,
+      stuff.startAngle,
+      stuff.endAngle,
+      stuff.isReversed,
+    );
+  } else if (stuff.hasCurve) {
+    c.moveTo(stuff.startX, stuff.startY);
+    for (var si = 0; si < stuff.segments.length; si++) {
+      var segment = stuff.segments[si];
+      c.bezierCurveTo(segment.control1X, segment.control1Y, segment.control2X, segment.control2Y, segment.endX, segment.endY);
+    }
+  } else {
+    c.moveTo(stuff.startX, stuff.startY);
+    c.lineTo(stuff.endX, stuff.endY);
+  }
+  c.stroke();
+  // draw the head of the arrow
+  if (stuff.hasCurve) {
+    var finalSegment = stuff.segments[stuff.segments.length - 1];
+    var tangentX = stuff.endX - finalSegment.control2X;
+    var tangentY = stuff.endY - finalSegment.control2Y;
+    drawArrow(c, stuff.endX, stuff.endY, Math.atan2(tangentY, tangentX));
+  } else if (stuff.hasCircle) {
+    drawArrow(
+      c,
+      stuff.endX,
+      stuff.endY,
+      stuff.endAngle - stuff.reverseScale * (Math.PI / 2),
+    );
+  } else {
+    drawArrow(
+      c,
+      stuff.endX,
+      stuff.endY,
+      Math.atan2(stuff.endY - stuff.startY, stuff.endX - stuff.startX),
+    );
+  }
+  // draw the text
+  if (stuff.hasCurve) {
+    var middle = stuff.segments[Math.floor(stuff.segments.length / 2)];
+    var textX = (middle.startX + 3 * middle.control1X + 3 * middle.control2X + middle.endX) / 8;
+    var textY = (middle.startY + 3 * middle.control1Y + 3 * middle.control2Y + middle.endY) / 8;
+    var textAngle = Math.atan2(stuff.endY - stuff.startY, stuff.endX - stuff.startX);
+    drawText(c, this.text, textX + this.labelDx, textY + this.labelDy, textAngle, selectedObject == this);
+  } else if (stuff.hasCircle) {
+    var startAngle = stuff.startAngle;
+    var endAngle = stuff.endAngle;
+    if (endAngle < startAngle) {
+      endAngle += Math.PI * 2;
+    }
+    var textAngle = (startAngle + endAngle) / 2 + stuff.isReversed * Math.PI;
+    var textX = stuff.circleX + stuff.circleRadius * Math.cos(textAngle);
+    var textY = stuff.circleY + stuff.circleRadius * Math.sin(textAngle);
+    drawText(
+      c,
+      this.text,
+      textX + this.labelDx,
+      textY + this.labelDy,
+      textAngle,
+      selectedObject == this,
+    );
+  } else {
+    var textX = (stuff.startX + stuff.endX) / 2;
+    var textY = (stuff.startY + stuff.endY) / 2;
+    var textAngle = Math.atan2(
+      stuff.endX - stuff.startX,
+      stuff.startY - stuff.endY,
+    );
+    drawText(
+      c,
+      this.text,
+      textX + this.labelDx,
+      textY + this.labelDy,
+      textAngle + this.lineAngleAdjust,
+      selectedObject == this,
+    );
+  }
+  if (stuff.hasCurve && (c.canvas !== canvas ? includeCurveHandlesInExports : false)) this.drawCurveHandles(c);
+};
+
+Link.prototype.drawCurveHandles = function (c) {
+  var handles = this.getCurveHandles();
+  c.save(); c.fillStyle = "white"; c.strokeStyle = "black"; c.lineWidth = 2;
+  for (var i = 0; i < handles.length; i++) {
+    if (typeof c.drawCurveHandle === "function") c.drawCurveHandle(handles[i].x, handles[i].y, 6);
+    else { c.beginPath(); c.arc(handles[i].x, handles[i].y, 6, 0, Math.PI * 2); c.fill(); c.stroke(); }
+  }
+  c.restore();
+};
+
+Link.prototype.containsPoint = function (x, y, extraTolerance) {
+  var tolerance = hitTargetPadding + (extraTolerance || 0);
+  var stuff = this.getEndPointsAndCircle();
+  if (stuff.hasCircle) {
+    var dx = x - stuff.circleX;
+    var dy = y - stuff.circleY;
+    var distance = Math.sqrt(dx * dx + dy * dy) - stuff.circleRadius;
+    if (Math.abs(distance) < tolerance) {
+      var angle = Math.atan2(dy, dx);
+      var startAngle = stuff.startAngle;
+      var endAngle = stuff.endAngle;
+      if (stuff.isReversed) {
+        var temp = startAngle;
+        startAngle = endAngle;
+        endAngle = temp;
+      }
+      if (endAngle < startAngle) {
+        endAngle += Math.PI * 2;
+      }
+      if (angle < startAngle) {
+        angle += Math.PI * 2;
+      } else if (angle > endAngle) {
+        angle -= Math.PI * 2;
+      }
+      return angle > startAngle && angle < endAngle;
+    }
+  } else if (stuff.hasCurve) {
+    for (var si = 0; si < stuff.segments.length; si++) {
+      var seg = stuff.segments[si], previous = { x: seg.startX, y: seg.startY };
+      for (var i = 1; i <= 24; i++) {
+        var t = i / 24, u = 1 - t;
+        var current = {
+          x: u * u * u * seg.startX + 3 * u * u * t * seg.control1X + 3 * u * t * t * seg.control2X + t * t * t * seg.endX,
+          y: u * u * u * seg.startY + 3 * u * u * t * seg.control1Y + 3 * u * t * t * seg.control2Y + t * t * t * seg.endY,
+        };
+        var dx = current.x - previous.x, dy = current.y - previous.y;
+        var length2 = dx * dx + dy * dy;
+        var percent = length2 ? Math.max(0, Math.min(1, ((x - previous.x) * dx + (y - previous.y) * dy) / length2)) : 0;
+        var distanceX = x - (previous.x + percent * dx), distanceY = y - (previous.y + percent * dy);
+        if (Math.sqrt(distanceX * distanceX + distanceY * distanceY) < tolerance) return true;
+        previous = current;
+      }
+    }
+  } else {
+    var dx = stuff.endX - stuff.startX;
+    var dy = stuff.endY - stuff.startY;
+    var length = Math.sqrt(dx * dx + dy * dy);
+    var percent =
+      (dx * (x - stuff.startX) + dy * (y - stuff.startY)) / (length * length);
+    var distance = (dx * (y - stuff.startY) - dy * (x - stuff.startX)) / length;
+    return percent > 0 && percent < 1 && Math.abs(distance) < tolerance;
+  }
+  return false;
+};
+
+Link.prototype.getCurveHandleAt = function (x, y) {
+  if (!showCurveHandles || this !== selectedObject || (!this.perpendicularPart && !this.curvePoints)) return -1;
+  var handles = this.getCurveHandles();
+  for (var i = handles.length - 1; i >= 0; i--) {
+    var dx = handles[i].x - x, dy = handles[i].y - y;
+    if (dx * dx + dy * dy <= 12 * 12) return i;
+  }
+  return -1;
+};
+
+function Node(x, y) {
+  this.x = x;
+  this.y = y;
+  this.mouseOffsetX = 0;
+  this.mouseOffsetY = 0;
+  this.isAcceptState = false;
+  this.text = "";
+}
+
+Node.prototype.setMouseStart = function (x, y) {
+  this.mouseOffsetX = this.x - x;
+  this.mouseOffsetY = this.y - y;
+};
+
+Node.prototype.setAnchorPoint = function (x, y) {
+  this.x = x + this.mouseOffsetX;
+  this.y = y + this.mouseOffsetY;
+};
+
+Node.prototype.draw = function (c) {
+  // draw the circle
+  c.beginPath();
+  c.arc(this.x, this.y, nodeRadius, 0, 2 * Math.PI, false);
+  c.stroke();
+
+  // draw the text
+  drawText(c, this.text, this.x, this.y, null, selectedObject == this);
+
+  // draw a double circle for an accept state
+  if (this.isAcceptState) {
+    c.beginPath();
+    c.arc(this.x, this.y, nodeRadius - 6, 0, 2 * Math.PI, false);
+    c.stroke();
+  }
+};
+
+Node.prototype.closestPointOnCircle = function (x, y) {
+  var dx = x - this.x;
+  var dy = y - this.y;
+  var scale = Math.sqrt(dx * dx + dy * dy);
+  return {
+    x: this.x + (dx * nodeRadius) / scale,
+    y: this.y + (dy * nodeRadius) / scale,
+  };
+};
+
+Node.prototype.containsPoint = function (x, y, extraTolerance) {
+  var radius = nodeRadius + (extraTolerance || 0);
+  return (
+    (x - this.x) * (x - this.x) + (y - this.y) * (y - this.y) < radius * radius
+  );
+};
+
+function SelfLink(node, mouse) {
+  this.node = node;
+  this.anchorAngle = 0;
+  this.mouseOffsetAngle = 0;
+  this.text = "";
+  this.labelDx = 0;
+  this.labelDy = 0;
+
+  if (mouse) {
+    this.setAnchorPoint(mouse.x, mouse.y);
+  }
+}
+
+SelfLink.prototype.setMouseStart = function (x, y) {
+  this.mouseOffsetAngle =
+    this.anchorAngle - Math.atan2(y - this.node.y, x - this.node.x);
+};
+
+SelfLink.prototype.setAnchorPoint = function (x, y) {
+  this.anchorAngle =
+    Math.atan2(y - this.node.y, x - this.node.x) + this.mouseOffsetAngle;
+  // snap to 90 degrees
+  var snap = Math.round(this.anchorAngle / (Math.PI / 2)) * (Math.PI / 2);
+  if (Math.abs(this.anchorAngle - snap) < 0.1) this.anchorAngle = snap;
+  // keep in the range -pi to pi so our containsPoint() function always works
+  if (this.anchorAngle < -Math.PI) this.anchorAngle += 2 * Math.PI;
+  if (this.anchorAngle > Math.PI) this.anchorAngle -= 2 * Math.PI;
+};
+
+SelfLink.prototype.getEndPointsAndCircle = function () {
+  var circleX = this.node.x + 1.5 * nodeRadius * Math.cos(this.anchorAngle);
+  var circleY = this.node.y + 1.5 * nodeRadius * Math.sin(this.anchorAngle);
+  var circleRadius = 0.75 * nodeRadius;
+  var startAngle = this.anchorAngle - Math.PI * 0.8;
+  var endAngle = this.anchorAngle + Math.PI * 0.8;
+  var startX = circleX + circleRadius * Math.cos(startAngle);
+  var startY = circleY + circleRadius * Math.sin(startAngle);
+  var endX = circleX + circleRadius * Math.cos(endAngle);
+  var endY = circleY + circleRadius * Math.sin(endAngle);
+  return {
+    hasCircle: true,
+    startX: startX,
+    startY: startY,
+    endX: endX,
+    endY: endY,
+    startAngle: startAngle,
+    endAngle: endAngle,
+    circleX: circleX,
+    circleY: circleY,
+    circleRadius: circleRadius,
+  };
+};
+
+SelfLink.prototype.draw = function (c) {
+  var stuff = this.getEndPointsAndCircle();
+  // draw arc
+  c.beginPath();
+  c.arc(
+    stuff.circleX,
+    stuff.circleY,
+    stuff.circleRadius,
+    stuff.startAngle,
+    stuff.endAngle,
+    false,
+  );
+  c.stroke();
+  // draw the text on the loop farthest from the node
+  var textX = stuff.circleX + stuff.circleRadius * Math.cos(this.anchorAngle);
+  var textY = stuff.circleY + stuff.circleRadius * Math.sin(this.anchorAngle);
+  drawText(
+    c,
+    this.text,
+    textX + this.labelDx,
+    textY + this.labelDy,
+    this.anchorAngle,
+    selectedObject == this,
+  );
+  // draw the head of the arrow
+  drawArrow(c, stuff.endX, stuff.endY, stuff.endAngle + Math.PI * 0.4);
+};
+
+SelfLink.prototype.containsPoint = function (x, y, extraTolerance) {
+  var stuff = this.getEndPointsAndCircle();
+  var dx = x - stuff.circleX;
+  var dy = y - stuff.circleY;
+  var distance = Math.sqrt(dx * dx + dy * dy) - stuff.circleRadius;
+  return Math.abs(distance) < hitTargetPadding + (extraTolerance || 0);
+};
+
+function StartLink(node, start) {
+  this.node = node;
+  this.deltaX = 0;
+  this.deltaY = 0;
+  this.text = "";
+  this.labelDx = 0;
+  this.labelDy = 0;
+
+  if (start) {
+    this.setAnchorPoint(start.x, start.y);
+  }
+}
+
+StartLink.prototype.setAnchorPoint = function (x, y) {
+  this.deltaX = x - this.node.x;
+  this.deltaY = y - this.node.y;
+
+  if (Math.abs(this.deltaX) < snapToPadding) {
+    this.deltaX = 0;
+  }
+
+  if (Math.abs(this.deltaY) < snapToPadding) {
+    this.deltaY = 0;
+  }
+};
+
+StartLink.prototype.getEndPoints = function () {
+  // Imported/generated start arrows may omit their anchor offset. A zero
+  // vector also makes closestPointOnCircle divide by zero, so give those
+  // arrows a visible default entry from above the state.
+  if (!isFinite(this.deltaX)) this.deltaX = 0;
+  if (!isFinite(this.deltaY)) this.deltaY = 0;
+  if (Math.sqrt(this.deltaX * this.deltaX + this.deltaY * this.deltaY) < 1e-6) {
+    this.deltaX = 0;
+    this.deltaY = -Math.max(50, nodeRadius * 2);
+  }
+  var startX = this.node.x + this.deltaX;
+  var startY = this.node.y + this.deltaY;
+  var end = this.node.closestPointOnCircle(startX, startY);
+  return {
+    startX: startX,
+    startY: startY,
+    endX: end.x,
+    endY: end.y,
+  };
+};
+
+StartLink.prototype.draw = function (c) {
+  var stuff = this.getEndPoints();
+
+  // draw the line
+  c.beginPath();
+  c.moveTo(stuff.startX, stuff.startY);
+  c.lineTo(stuff.endX, stuff.endY);
+  c.stroke();
+
+  // draw the text at the end without the arrow
+  var textAngle = Math.atan2(
+    stuff.startY - stuff.endY,
+    stuff.startX - stuff.endX,
+  );
+  drawText(
+    c,
+    this.text,
+    stuff.startX + this.labelDx,
+    stuff.startY + this.labelDy,
+    textAngle,
+    selectedObject == this,
+  );
+
+  // draw the head of the arrow
+  drawArrow(c, stuff.endX, stuff.endY, Math.atan2(-this.deltaY, -this.deltaX));
+};
+
+StartLink.prototype.containsPoint = function (x, y, extraTolerance) {
+  var stuff = this.getEndPoints();
+  var dx = stuff.endX - stuff.startX;
+  var dy = stuff.endY - stuff.startY;
+  var length = Math.sqrt(dx * dx + dy * dy);
+  var percent =
+    (dx * (x - stuff.startX) + dy * (y - stuff.startY)) / (length * length);
+  var distance = (dx * (y - stuff.startY) - dy * (x - stuff.startX)) / length;
+  return percent > 0 && percent < 1 && Math.abs(distance) < hitTargetPadding + (extraTolerance || 0);
+};
+
+function TemporaryLink(from, to) {
+  this.from = from;
+  this.to = to;
+}
+
+TemporaryLink.prototype.draw = function (c) {
+  // draw the line
+  c.beginPath();
+  c.moveTo(this.to.x, this.to.y);
+  c.lineTo(this.from.x, this.from.y);
+  c.stroke();
+
+  // draw the head of the arrow
+  drawArrow(
+    c,
+    this.to.x,
+    this.to.y,
+    Math.atan2(this.to.y - this.from.y, this.to.x - this.from.x),
+  );
+};
+
 // draw using this instead of a canvas and call toLaTeX() afterward
 function ExportAsLaTeX() {
   this._points = [];
@@ -728,7 +1432,7 @@ function ExportAsTypst() {
   this.translate = this.save = this.restore = this.clearRect = function () {};
 }
 
-// DFA/NFA analysis and NFA subset construction for the current canvas graph.
+// DFA/NFA/Moore/Mealy analysis and conversion for the current canvas graph.
 var automataPanelSignature = "";
 var automataPanelWorkspaceId = null;
 var automataStatusMessage = "";
@@ -741,7 +1445,30 @@ function automataSplitLabel(label) {
   return String(label || "").split(",").map(function (part) { return part.trim(); }).filter(Boolean);
 }
 
+function automataGrammarVariable(index) {
+  var subscripts = "₀₁₂₃₄₅₆₇₈₉";
+  return "Q" + String(index).replace(/[0-9]/g, function (digit) { return subscripts[Number(digit)]; });
+}
+
+function automataSelectedType() {
+  var select = document.getElementById("automata-type");
+  return select ? select.value : "dfa";
+}
+
+function automataTransitionParts(raw, type) {
+  var text = String(raw || "");
+  if (type !== "mealy") return { symbol: text.trim(), output: "" };
+  var slash = text.indexOf("/");
+  return slash < 0 ? { symbol: text.trim(), output: "" } : { symbol: text.slice(0, slash).trim(), output: text.slice(slash + 1).trim() };
+}
+
+function automataMooreParts(raw) {
+  var text = String(raw || ""), slash = text.lastIndexOf("/");
+  return slash < 0 ? { name: text.trim(), output: "" } : { name: text.slice(0, slash).trim(), output: text.slice(slash + 1).trim() };
+}
+
 function automataBuildModel() {
+  var type = automataSelectedType();
   var nodeIds = new Map();
   nodes.forEach(function (node, i) { nodeIds.set(node, i); });
   var edges = [], starts = [];
@@ -761,11 +1488,15 @@ function automataBuildModel() {
   });
   var inferred = [];
   edges.forEach(function (edge) {
-    if (edge.symbol && !automataEpsilon(edge.symbol) && inferred.indexOf(edge.symbol) < 0) inferred.push(edge.symbol);
+    var parts = automataTransitionParts(edge.symbol, type), symbol = parts.symbol;
+    if (symbol && !automataEpsilon(symbol) && inferred.indexOf(symbol) < 0) inferred.push(symbol);
   });
   inferred.sort();
   return {
-    nodes: nodes.map(function (node, i) { return { id: i, name: node.text || "q" + i, accepting: !!node.isAcceptState }; }),
+    nodes: nodes.map(function (node, i) {
+      var moore = type === "moore" ? automataMooreParts(node.text || "q" + i) : { name: node.text || "q" + i, output: "" };
+      return { id: i, name: moore.name || "q" + i, output: moore.output, accepting: !!node.isAcceptState };
+    }),
     starts: starts,
     accepts: nodes.map(function (node, i) { return node.isAcceptState ? i : -1; }).filter(function (i) { return i >= 0; }),
     edges: edges,
@@ -782,35 +1513,39 @@ function automataAlphabet(model) {
 
 function automataAnalyze(model, type, alphabet) {
   var errors = [], warnings = [], n = model.nodes.length;
+  var deterministicType = type === "dfa" || type === "moore" || type === "mealy";
   if (!n) errors.push("Add at least one state.");
   if (!model.starts.length) errors.push("No start arrow is assigned.");
-  if (model.starts.length > 1) errors.push("There are " + model.starts.length + " start arrows; a DFA/NFA has one start state.");
-  if (!model.accepts.length) warnings.push("No accepting states: the machine accepts the empty language.");
+  if (model.starts.length > 1) errors.push("There are " + model.starts.length + " start arrows; this machine type requires exactly one start state.");
+  if ((type === "dfa" || type === "nfa") && !model.accepts.length) warnings.push("No accepting states: the machine accepts the empty language.");
   var epsilonCount = 0, emptyLabels = 0, invalidTargets = 0;
   var targets = new Map(), adjacency = Array.from({ length: n }, function () { return []; });
   model.edges.forEach(function (edge) {
     if (edge.from == null || edge.to == null || edge.from < 0 || edge.to < 0 || edge.from >= n || edge.to >= n) { invalidTargets++; return; }
-    if (!edge.symbol) { emptyLabels++; return; }
-    if (automataEpsilon(edge.symbol)) epsilonCount++;
-    var key = edge.from + "\u0000" + edge.symbol;
+    var parts = automataTransitionParts(edge.symbol, type);
+    if (!parts.symbol || (type === "mealy" && !parts.output)) { emptyLabels++; return; }
+    if (automataEpsilon(parts.symbol)) epsilonCount++;
+    var key = edge.from + "\u0000" + parts.symbol;
     if (!targets.has(key)) targets.set(key, new Set());
-    targets.get(key).add(edge.to);
-    adjacency[edge.from].push({ to: edge.to, symbol: edge.symbol });
+    targets.get(key).add(type === "mealy" ? edge.to + "\u0001" + parts.output : edge.to);
+    adjacency[edge.from].push({ to: edge.to, symbol: parts.symbol });
   });
   if (invalidTargets) errors.push(invalidTargets + " transition(s) point to a state that is no longer in the diagram.");
-  if (emptyLabels) errors.push(emptyLabels + " transition(s) have no input symbol.");
-  if (type === "dfa" && epsilonCount) errors.push("A DFA cannot contain ε-transitions (" + epsilonCount + " found).");
+  if (emptyLabels) errors.push(type === "mealy" ? emptyLabels + " transition(s) need input/output labels, such as a/accept." : emptyLabels + " transition(s) have no input symbol.");
+  if (type !== "nfa" && epsilonCount) errors.push("" + type.toUpperCase() + " machines cannot contain ε-transitions (" + epsilonCount + " found).");
+  if (type === "moore" && model.nodes.some(function (node) { return !node.output; })) errors.push("Each Moore state needs an output in its label, such as q0/accept.");
   var alphabetSet = new Set(alphabet), outsideAlphabet = [];
   model.edges.forEach(function (edge) {
-    if (edge.symbol && !automataEpsilon(edge.symbol) && !alphabetSet.has(edge.symbol) && outsideAlphabet.indexOf(edge.symbol) < 0) outsideAlphabet.push(edge.symbol);
+    var symbol = automataTransitionParts(edge.symbol, type).symbol;
+    if (symbol && !automataEpsilon(symbol) && !alphabetSet.has(symbol) && outsideAlphabet.indexOf(symbol) < 0) outsideAlphabet.push(symbol);
   });
   if (outsideAlphabet.length) errors.push("Transition symbols outside the selected alphabet: " + outsideAlphabet.join(", ") + ".");
   var duplicateTransitions = [];
   targets.forEach(function (destinations, key) {
-    if (destinations.size > 1) duplicateTransitions.push(key.split("\u0000")[0] + ": " + Array.from(destinations).map(function (i) { return model.nodes[i].name; }).join(" / "));
+    if (destinations.size > 1) duplicateTransitions.push(key.split("\u0000")[0] + (type === "mealy" ? ": multiple outputs/destinations" : ": " + Array.from(destinations).map(function (i) { return model.nodes[i].name; }).join(" / ")));
   });
   var deterministic = duplicateTransitions.length === 0 && epsilonCount === 0;
-  if (type === "dfa" && duplicateTransitions.length) errors.push("DFA is nondeterministic for " + duplicateTransitions.length + " state/symbol pair(s).");
+  if (deterministicType && duplicateTransitions.length) errors.push(type.toUpperCase() + " is nondeterministic for " + duplicateTransitions.length + " state/symbol pair(s).");
   if (!alphabet.length && n) warnings.push("No input symbols are defined. Enter an alphabet above or add labeled arrows.");
   var missing = [];
   model.nodes.forEach(function (node) {
@@ -819,8 +1554,8 @@ function automataAnalyze(model, type, alphabet) {
       if (!destinations || destinations.size === 0) missing.push(node.name + " — " + symbol);
     });
   });
-  if (type === "dfa") {
-    if (missing.length) errors.push("DFA is incomplete: " + missing.length + " transition(s) are missing.");
+  if (deterministicType) {
+    if (missing.length) errors.push(type.toUpperCase() + " is incomplete: " + missing.length + " transition(s) are missing.");
   }
   var reachable = new Set();
   var queue = model.starts.slice();
@@ -834,7 +1569,9 @@ function automataAnalyze(model, type, alphabet) {
   if (unreachable.length) warnings.push("Unreachable states: " + unreachable.join(", ") + ".");
   var reverse = Array.from({ length: n }, function () { return []; });
   adjacency.forEach(function (list, from) { list.forEach(function (edge) { reverse[edge.to].push(from); }); });
-  var canAccept = new Set(), back = model.accepts.slice();
+  var acceptanceStates = type === "moore" ? model.nodes.filter(function (node) { return node.output === "accept"; }).map(function (node) { return node.id; }) :
+    type === "mealy" ? model.edges.filter(function (edge) { return automataTransitionParts(edge.symbol, type).output === "accept"; }).map(function (edge) { return edge.from; }) : model.accepts.slice();
+  var canAccept = new Set(), back = acceptanceStates;
   while (back.length) {
     var accepted = back.shift();
     if (canAccept.has(accepted) || accepted < 0 || accepted >= n) continue;
@@ -876,6 +1613,15 @@ function refreshAutomataPanel(force) {
   if (!force && signature === automataPanelSignature) return;
   automataPanelSignature = signature;
   var mode = document.getElementById("automata-type").value;
+  var leanButton = document.getElementById("automata-lean");
+  if (leanButton) {
+    leanButton.disabled = false;
+    leanButton.title = mode === "mealy"
+      ? "Lean checks the DFA structure with final Mealy output 'accept' treated as acceptance; it does not prove conversion semantics."
+      : mode === "moore"
+        ? "Lean checks the DFA structure derived from Moore outputs, with 'accept' states accepting; it does not prove conversion semantics."
+      : "Check the current machine's structural invariants with Lean.";
+  }
   var alpha = automataAlphabet(model);
   var report = automataAnalyze(model, mode, alpha);
   var summary = document.getElementById("automata-summary"), results = document.getElementById("automata-results");
@@ -894,69 +1640,210 @@ function refreshAutomataPanel(force) {
   if (automataStatusMessage) automataAddResult(results, automataStatusMessage, automataStatusMessage.indexOf("verified") >= 0 ? "ok" : "");
 }
 
-function automataConvertNfaToDfa() {
-  var model = automataBuildModel(), alphabet = automataAlphabet(model);
-  var report = automataAnalyze(model, "nfa", alphabet);
-  if (!report.valid) { automataStatusMessage = "Fix validation errors before converting."; refreshAutomataPanel(true); return; }
-  if (!model.starts.length) return;
-  function closure(seed) {
-    var result = new Set(seed), queue = seed.slice();
-    while (queue.length) {
-      var state = queue.shift();
-      model.edges.forEach(function (edge) {
-        if (edge.from === state && automataEpsilon(edge.symbol) && !result.has(edge.to)) { result.add(edge.to); queue.push(edge.to); }
-      });
-    }
-    return result;
-  }
-  function key(set) { return Array.from(set).sort(function (a, b) { return a - b; }).join(","); }
-  var initial = closure([model.starts[0]]), subsets = [initial], byKey = new Map([[key(initial), 0]]), transitions = [], cursor = 0;
-  while (cursor < subsets.length) {
-    var fromSet = subsets[cursor];
-    alphabet.forEach(function (symbol) {
-      var destinations = new Set();
-      fromSet.forEach(function (state) {
-        model.edges.forEach(function (edge) { if (edge.from === state && edge.symbol === symbol) destinations.add(edge.to); });
-      });
-      var target = closure(Array.from(destinations)), targetKey = key(target);
-      if (!byKey.has(targetKey)) {
-        if (subsets.length >= 256) throw new Error("Subset construction exceeded 256 DFA states; conversion stopped.");
-        byKey.set(targetKey, subsets.length); subsets.push(target);
+function automataAcceptorFromModel(model, type, alphabet) {
+  var transitions = model.edges.map(function (edge) {
+    var parts = automataTransitionParts(edge.symbol, type);
+    return { from: edge.from, to: edge.to, symbol: parts.symbol, output: parts.output };
+  });
+  if (type === "nfa") {
+    var epsilonEdges = transitions.filter(function (edge) { return automataEpsilon(edge.symbol); });
+    function closure(seed) {
+      var set = new Set(seed), queue = seed.slice();
+      while (queue.length) {
+        var q = queue.shift();
+        epsilonEdges.forEach(function (edge) { if (edge.from === q && !set.has(edge.to)) { set.add(edge.to); queue.push(edge.to); } });
       }
-      transitions.push({ from: cursor, to: byKey.get(targetKey), symbol: symbol });
+      return Array.from(set).sort(function (a, b) { return a - b; });
+    }
+    function setKey(set) { return set.join(","); }
+    var subsets = [closure(model.starts)], subsetIds = new Map([[setKey(subsets[0]), 0]]), dfaEdges = [], cursor = 0;
+    while (cursor < subsets.length) {
+      var current = subsets[cursor];
+      alphabet.forEach(function (symbol) {
+        var moved = new Set();
+        current.forEach(function (q) { transitions.forEach(function (edge) { if (edge.from === q && edge.symbol === symbol) moved.add(edge.to); }); });
+        var target = closure(Array.from(moved)), key = setKey(target);
+        if (!subsetIds.has(key)) {
+          if (subsets.length >= 256) throw new Error("Subset construction exceeded 256 states; conversion stopped.");
+          subsetIds.set(key, subsets.length); subsets.push(target);
+        }
+        dfaEdges.push({ from: cursor, to: subsetIds.get(key), symbol: symbol });
+      });
+      cursor++;
+    }
+    return {
+      nodes: subsets.map(function (set, id) { return { id: id, name: "q" + id, accepting: set.some(function (q) { return model.nodes[q].accepting; }) }; }),
+      starts: [0], accepts: subsets.map(function (set, id) { return set.some(function (q) { return model.nodes[q].accepting; }) ? id : -1; }).filter(function (id) { return id >= 0; }),
+      edges: dfaEdges, alphabet: alphabet,
+    };
+  }
+  if (type === "mealy") {
+    var map = new Map(), states = [], edgesOut = [], nameCounts = new Map();
+    function getState(q, accepts) {
+      var key = q + ":" + (accepts ? "1" : "0");
+      if (!map.has(key)) {
+        if (states.length >= 512) throw new Error("Mealy conversion exceeded 512 states; conversion stopped.");
+        var baseName = model.nodes[q].name, copy = nameCounts.get(baseName) || 0;
+        nameCounts.set(baseName, copy + 1);
+        map.set(key, states.length); states.push({ q: q, accepting: accepts, name: baseName + (copy ? "′" + (copy + 1) : "") });
+      }
+      return map.get(key);
+    }
+    var initial = getState(model.starts[0], false), cursor = 0;
+    while (cursor < states.length) {
+      var current = states[cursor];
+      transitions.forEach(function (edge) {
+        if (edge.from !== current.q || automataEpsilon(edge.symbol)) return;
+        var target = getState(edge.to, edge.output === "accept");
+        edgesOut.push({ from: cursor, to: target, symbol: edge.symbol });
+      });
+      cursor++;
+    }
+    return { nodes: states.map(function (state, id) { return { id: id, name: state.name, accepting: state.accepting }; }),
+      starts: [initial], accepts: states.map(function (state, id) { return state.accepting ? id : -1; }).filter(function (id) { return id >= 0; }),
+      edges: edgesOut, alphabet: alphabet };
+  }
+
+  var nodes = model.nodes.map(function (node, id) {
+    var accepting = type === "moore" ? node.output === "accept" : node.accepting;
+    return { id: id, name: node.name, accepting: accepting };
+  });
+  if (type === "moore") {
+    return { nodes: nodes, starts: model.starts.slice(), accepts: nodes.filter(function (node) { return node.accepting; }).map(function (node) { return node.id; }),
+      edges: transitions.map(function (edge) { return { from: edge.from, to: edge.to, symbol: edge.symbol }; }), alphabet: alphabet };
+  }
+  return { nodes: nodes, starts: model.starts.slice(), accepts: model.accepts.slice(),
+    edges: transitions.map(function (edge) { return { from: edge.from, to: edge.to, symbol: edge.symbol }; }), alphabet: alphabet };
+}
+
+// Shared right-linear grammar representation. Moore outputs mark accepting
+// states; Mealy terminals preserve input/output traces as pair symbols.
+function automataBuildType3Grammar(model, type) {
+  var rules = [], terminals = [], stateCount = model.nodes.length;
+  var start = model.starts[0];
+  function addTerminal(from, to, symbol) {
+    rules.push({ from: from, to: to, symbol: symbol });
+    if (symbol && terminals.indexOf(symbol) < 0) terminals.push(symbol);
+  }
+  model.edges.forEach(function (edge) {
+    var parts = automataTransitionParts(edge.symbol, type), terminal = parts.symbol;
+    if (type === "mealy") terminal += "/" + parts.output;
+    if (type === "nfa" && automataEpsilon(parts.symbol)) terminal = "";
+    addTerminal(edge.from, edge.to, terminal);
+  });
+  if (type === "mealy") {
+    model.nodes.forEach(function (node) { addTerminal(node.id, null, ""); });
+  } else if (type === "moore") {
+    model.nodes.filter(function (node) { return node.output === "accept"; }).forEach(function (node) { addTerminal(node.id, null, ""); });
+  } else {
+    model.accepts.forEach(function (state) { addTerminal(state, null, ""); });
+  }
+  rules.sort(function (a, b) { return a.from - b.from || a.symbol.localeCompare(b.symbol) || (a.to == null ? -1 : a.to) - (b.to == null ? -1 : b.to); });
+  return { stateCount: stateCount, start: start, freshStart: false, stateNames: model.nodes.map(function (node, id) { return node.name || "q_" + id; }), rules: rules, terminals: terminals.sort() };
+}
+
+function automataType3GrammarToNfa(grammar) {
+  // A → aB becomes an a-edge; A → ε marks the variable-state accepting.
+  var accepting = new Set(grammar.rules.filter(function (rule) { return rule.to == null && !rule.symbol; }).map(function (rule) { return rule.from; }));
+  var edges = grammar.rules.filter(function (rule) { return rule.to != null; }).map(function (rule) {
+    return { from: rule.from, to: rule.to, symbol: rule.symbol || "ε" };
+  });
+  return {
+    nodes: Array.from({ length: grammar.stateCount }, function (_, id) { return { id: id, name: grammar.freshStart && id === grammar.start ? "S" : grammar.stateNames[id] || "q_" + id, accepting: accepting.has(id) }; }),
+    starts: [grammar.start], accepts: Array.from(accepting).sort(function (a, b) { return a - b; }), edges: edges, alphabet: grammar.terminals,
+  };
+}
+
+function automataType3GrammarToDfa(grammar) {
+  return automataAcceptorFromModel(automataType3GrammarToNfa(grammar), "nfa", grammar.terminals);
+}
+
+// Convert Moore/Mealy acceptor semantics through a right-linear Type 3 grammar.
+function automataOutputMachineToNfa(model, type, alphabet) {
+  var acceptor = type === "mealy" ? automataAcceptorFromModel(model, "mealy", alphabet) : model;
+  var grammar = automataBuildType3Grammar(acceptor, type === "moore" ? "moore" : "dfa");
+  var nfa = automataType3GrammarToNfa(grammar);
+  nfa.alphabet = grammar.terminals;
+  return { grammar: grammar, nfa: nfa };
+}
+
+function automataMealyToMoore(model, alphabet) {
+  var transitions = model.edges.map(function (edge) {
+    var parts = automataTransitionParts(edge.symbol, "mealy");
+    return { from: edge.from, to: edge.to, symbol: parts.symbol, output: parts.output };
+  });
+  var ids = new Map(), states = [], edges = [];
+  function stateFor(q, output) {
+    var key = q + "\u0000" + output;
+    if (!ids.has(key)) {
+      if (states.length >= 512) throw new Error("Mealy-to-Moore conversion exceeded 512 states; conversion stopped.");
+      ids.set(key, states.length); states.push({ q: q, output: output, name: model.nodes[q].name + " / " + output });
+    }
+    return ids.get(key);
+  }
+  var start = stateFor(model.starts[0], "∅"), cursor = 0;
+  while (cursor < states.length) {
+    var current = states[cursor];
+    transitions.forEach(function (edge) {
+      if (edge.from !== current.q) return;
+      edges.push({ from: cursor, to: stateFor(edge.to, edge.output), symbol: edge.symbol });
     });
     cursor++;
   }
-  var groups = new Map();
-  transitions.forEach(function (edge) {
-    var groupKey = edge.from + ":" + edge.to;
-    if (!groups.has(groupKey)) groups.set(groupKey, { from: edge.from, to: edge.to, symbols: [] });
-    groups.get(groupKey).symbols.push(edge.symbol);
+  return { nodes: states.map(function (state, id) { return { id: id, name: state.name, accepting: false }; }), starts: [start], accepts: [], edges: edges, alphabet: alphabet };
+}
+
+function automataMooreToMealy(model, alphabet) {
+  var edges = model.edges.map(function (edge) {
+    var parts = automataTransitionParts(edge.symbol, "moore");
+    return { from: edge.from, to: edge.to, symbol: parts.symbol + "/" + model.nodes[edge.to].output };
   });
-  var newNodes = subsets.map(function (set) {
-    var members = Array.from(set).sort(function (a, b) { return a - b; });
-    return { text: members.length ? "{" + members.map(function (i) { return model.nodes[i].name; }).join(",") + "}" : "∅", isAcceptState: members.some(function (i) { return model.nodes[i].accepting; }) };
-  });
-  var width = pageWidthPx(), height = pageHeightPx(), cx = width / 2, cy = height / 2;
-  var radius = Math.max(0, Math.min(width * 0.34, height * 0.34, 260));
-  newNodes.forEach(function (node, i) {
-    var angle = -Math.PI / 2 + 2 * Math.PI * i / Math.max(1, newNodes.length);
-    node.x = cx + radius * Math.cos(angle); node.y = cy + radius * Math.sin(angle);
-  });
-  var newLinks = [];
-  newNodes.forEach(function (_, i) { if (i === 0) newLinks.push({ type: "StartLink", node: i, text: "" }); });
-  groups.forEach(function (group) {
-    var text = group.symbols.join(",");
-    if (group.from === group.to) newLinks.push({ type: "SelfLink", node: group.from, text: text, anchorAngle: -Math.PI / 2 });
-    else newLinks.push({ type: "Link", nodeA: group.from, nodeB: group.to, text: text, parallelPart: 0.5, perpendicularPart: 0, curvePoints: null });
-  });
-  flushHistory(); saveBackup();
-  var baseName = Workspace.getActive() ? Workspace.getActive().name : "NFA";
-  var newId = Workspace.create("DFA from " + baseName);
-  Workspace.switchTo(newId);
-  var data = { nodes: newNodes, links: newLinks, style: getStyle(), pages: pageCount, pageSize: pageSizeKey, margins: pageMarginsForExport(), constrainToMargins: constrainToMargins };
-  Workspace.saveActive(data); deserializeState(data); History.reset(snapshotJSON()); draw();
-  automataStatusMessage = "Created a DFA with " + subsets.length + " subset state(s) in the workspace.";
+  return { nodes: model.nodes.map(function (node) { return { id: node.id, name: node.name, accepting: false }; }),
+    starts: model.starts.slice(), accepts: [], edges: edges, alphabet: alphabet };
+}
+
+function automataConvertMachine() {
+  var model = automataBuildModel(), source = automataSelectedType();
+  var target = document.getElementById("automata-convert-target").value, alphabet = automataAlphabet(model);
+  var report = automataAnalyze(model, source, alphabet);
+  if (!report.valid) { automataStatusMessage = "Fix validation errors before converting."; refreshAutomataPanel(true); return; }
+  var result, emptyWordAccepted = false;
+  if (source === "mealy" && target === "moore") result = automataMealyToMoore(model, alphabet);
+  else if (source === "moore" && target === "mealy") result = automataMooreToMealy(model, alphabet);
+  else if (source === target) result = {
+    nodes: model.nodes.map(function (node) { return { id: node.id, name: source === "moore" ? node.name + " / " + node.output : node.name, accepting: node.accepting }; }),
+    starts: model.starts.slice(), accepts: model.accepts.slice(),
+    edges: model.edges.map(function (edge) { var p = automataTransitionParts(edge.symbol, source); return { from: edge.from, to: edge.to, symbol: source === "mealy" ? p.symbol + "/" + p.output : p.symbol }; }),
+    alphabet: alphabet,
+  };
+  else if ((source === "moore" || source === "mealy") && (target === "dfa" || target === "nfa")) {
+    var regular = automataOutputMachineToNfa(model, source, alphabet);
+    result = target === "nfa" ? regular.nfa : automataAcceptorFromModel(regular.nfa, "nfa", regular.grammar.terminals);
+  } else {
+    var acceptor = automataAcceptorFromModel(model, source, alphabet);
+    emptyWordAccepted = acceptor.accepts.indexOf(acceptor.starts[0]) >= 0;
+    if (target === "nfa" || target === "dfa") result = acceptor;
+    else if (target === "moore") {
+      result = { nodes: acceptor.nodes.map(function (node) { return { id: node.id, name: node.name + " / " + (node.accepting ? "accept" : "reject"), accepting: false }; }),
+        starts: acceptor.starts, accepts: [], edges: acceptor.edges, alphabet: alphabet };
+    } else {
+      result = { nodes: acceptor.nodes.map(function (node) { return { id: node.id, name: node.name, accepting: false }; }),
+        starts: acceptor.starts, accepts: [],
+        edges: acceptor.edges.map(function (edge) { var dest = acceptor.nodes[edge.to]; return { from: edge.from, to: edge.to, symbol: edge.symbol + "/" + (dest.accepting ? "accept" : "reject") }; }), alphabet: alphabet };
+    }
+  }
+  result.type = target;
+  var labels = { dfa: "DFA", nfa: "NFA", moore: "Moore machine", mealy: "Mealy machine" };
+  automataCreateWorkspace(labels[target] + " from " + labels[source], result, result.alphabet || alphabet);
+  var note = "Created a " + labels[target] + " in the workspace.";
+  if (source === "mealy" && (target === "dfa" || target === "nfa")) note += " Converted through a right-linear Type 3 grammar over the input alphabet; its ε-productions mark accepting states. An 'accept' output on the final transition makes the state accepting; the empty word is rejected.";
+  if (source === "moore" && (target === "dfa" || target === "nfa")) note += " Converted through a right-linear Type 3 grammar; Moore states outputting 'accept' produce ε and become accepting states.";
+  if ((source === "moore" || source === "mealy") && target === "nfa") note += " (For a deterministic source, the resulting NFA may be identical to the DFA.)";
+  if (source === "mealy" && target === "moore") note += " Moore's start state is labeled ∅ because Mealy machines emit no initial output.";
+  if (source === "moore" && target === "mealy") note += " The initial Moore output has no matching Mealy transition, so only outputs produced after input symbols are preserved.";
+  if ((source === "dfa" || source === "nfa") && (target === "moore" || target === "mealy")) note += " Outputs are 'accept' or 'reject' according to the acceptor state after each input.";
+  if (target === "mealy" && emptyWordAccepted) note += " The source accepts the empty word, which a Mealy machine cannot represent because it emits no output before input.";
+  automataStatusMessage = note;
   refreshAutomataPanel(true);
 }
 
@@ -968,8 +1855,8 @@ function automataCreateWorkspace(name, generated, alphabet) {
   var generatedPages = Math.max(1, Math.ceil(count / perPage));
   var radius = nodeRadius;
 
-  // Preserve Pyformlang's construction order. Its state IDs are qN, and
-  // numeric ordering keeps the Thompson-NFA chains and branches local.
+  // Preserve generated state numbering; numeric ordering keeps Thompson-NFA
+  // chains and branches local in the diagram.
   var stateOrder = generated.nodes.map(function (_, i) { return i; });
   stateOrder.sort(function (a, b) {
     var an = String(generated.nodes[a].name || "q" + a), bn = String(generated.nodes[b].name || "q" + b);
@@ -1112,15 +1999,19 @@ function automataCreateWorkspace(name, generated, alphabet) {
   });
   flushHistory(); saveBackup();
   var newId = Workspace.create(name);
+  var generatedType = generated.type || "nfa", generatedAlphabet = alphabet || [];
+  try {
+    localStorage.setItem("fsm-automata-type-" + newId, generatedType);
+    localStorage.setItem("fsm-automata-alphabet-" + newId, generatedAlphabet.join(", "));
+  } catch (e) {}
   Workspace.switchTo(newId);
   var data = { nodes: generatedNodes, links: generatedLinks, style: getStyle(), pages: generatedPages,
     pageSize: pageSizeKey, margins: pageMarginsForExport(), constrainToMargins: constrainToMargins };
   Workspace.saveActive(data); deserializeState(data);
   History.reset(snapshotJSON()); draw();
-  try {
-    localStorage.setItem("fsm-automata-type-" + newId, generated.type || "nfa");
-    localStorage.setItem("fsm-automata-alphabet-" + newId, (alphabet || []).join(", "));
-  } catch (e) {}
+  var typeSelect = document.getElementById("automata-type"), alphabetInput = document.getElementById("automata-alphabet");
+  if (typeSelect) typeSelect.value = generatedType;
+  if (alphabetInput) alphabetInput.value = generatedAlphabet.join(", ");
   automataStatusMessage = "Created " + name + " with " + generatedNodes.length + " states in the workspace.";
   refreshAutomataPanel(true);
 }
@@ -1167,11 +2058,11 @@ function ensureRegexLeanButton(syntaxSelect) {
     var modeSelect = document.getElementById("automata-regex-mode");
     var syntax = syntaxSelect.value;
     var mode = modeSelect ? modeSelect.value : "nfa";
-    var supported = syntax === "theory";
+    var supported = syntax === "theory" && (mode === "nfa" || mode === "dfa");
     btn.disabled = !supported;
     btn.title = supported
       ? "Check that Python and Lean agree exactly on this construction (\u03b5-NFA, plus the DFA step when DFA output is selected)"
-      : "Lean verification currently only covers the formal (theory) syntax";
+      : "Regex-construction verification supports only formal syntax with ε-NFA or DFA output";
   }
   syntaxSelect.addEventListener("change", sync);
   var modeSelect = document.getElementById("automata-regex-mode");
@@ -1223,32 +2114,230 @@ function automataGenerateRegex() {
     .then(function (generated) {
       var tag = generated.experimental ? " [experimental formal-theory]" : " [python-style]";
       automataCreateWorkspace("From regex: " + expression + tag, generated, generated.alphabet);
+      if (generated.type === "mealy" && generated.emptyWordAccepted) {
+        automataStatusMessage = "Created the Mealy machine, but it cannot represent acceptance of the empty word because it emits no output before input.";
+        refreshAutomataPanel(true);
+      }
     })
     .catch(function (error) { automataStatusMessage = error.message; refreshAutomataPanel(true); })
     .finally(function () { button.disabled = false; });
 }
 
 function automataShowRegularGrammar() {
-  var model = automataBuildModel(), output = document.getElementById("automata-grammar");
+  var machineType = automataSelectedType(), model = automataBuildModel(), output = document.getElementById("automata-grammar");
+  var grammarReport = automataAnalyze(model, machineType, automataAlphabet(model));
+  if (machineType === "mealy") {
+    var mealyReport = automataAnalyze(model, machineType, automataAlphabet(model));
+    if (!mealyReport.valid) {
+      automataStatusMessage = "Cannot display a deterministic Mealy trace grammar while the machine is invalid: " + mealyReport.errors.join(" ");
+      output.hidden = true;
+      refreshAutomataPanel(true); return;
+    }
+  }
+  if (machineType === "moore" && model.nodes.some(function (node) { return !node.output; })) { automataStatusMessage = "Give every Moore state an output before converting."; refreshAutomataPanel(true); return; }
+  if (machineType === "mealy" && model.edges.some(function (edge) { var p = automataTransitionParts(edge.symbol, machineType); return !p.symbol || !p.output; })) { automataStatusMessage = "Give every Mealy arrow an input/output label before converting."; refreshAutomataPanel(true); return; }
   if (model.nodes.length === 0 || model.starts.length !== 1) {
     automataStatusMessage = "A regular grammar needs at least one state and exactly one start arrow.";
     refreshAutomataPanel(true); return;
   }
-  var alternatives = model.nodes.map(function () { return []; });
+  var grammar = automataBuildType3Grammar(model, machineType);
   var hasUnlabeled = model.edges.some(function (edge) { return !edge.symbol; });
   if (hasUnlabeled) {
     automataStatusMessage = "Add an input symbol to every arrow before converting this FSM to a grammar.";
     refreshAutomataPanel(true); return;
   }
-  model.edges.forEach(function (edge) {
-    if (!edge.symbol || edge.from == null || edge.to == null || !alternatives[edge.from] || !alternatives[edge.to]) return;
-    if (automataEpsilon(edge.symbol)) alternatives[edge.from].push("Q" + edge.to);
-    else alternatives[edge.from].push(edge.symbol + " Q" + edge.to);
+  var reachable = new Set([grammar.start]), queue = [grammar.start];
+  while (queue.length) {
+    var current = queue.shift();
+    grammar.rules.forEach(function (rule) {
+      if (rule.from === current && rule.to != null && !reachable.has(rule.to)) { reachable.add(rule.to); queue.push(rule.to); }
+    });
+  }
+  var generating = new Set(grammar.rules.filter(function (rule) { return rule.to == null && !rule.symbol; }).map(function (rule) { return rule.from; }));
+  var changed = true;
+  while (changed) {
+    changed = false;
+    grammar.rules.forEach(function (rule) {
+      if (rule.to != null && generating.has(rule.to) && !generating.has(rule.from)) { generating.add(rule.from); changed = true; }
+    });
+  }
+  var keptStates = Array.from(reachable).filter(function (id) { return generating.has(id); });
+  if (keptStates.indexOf(grammar.start) < 0) keptStates.push(grammar.start);
+  keptStates.sort(function (a, b) { return a - b; });
+  keptStates = [grammar.start].concat(keptStates.filter(function (id) { return id !== grammar.start; }));
+  var variableIds = new Map(keptStates.map(function (id, index) { return [id, index]; }));
+  var alternatives = keptStates.map(function () { return []; });
+  grammar.rules.forEach(function (rule) {
+    if (!variableIds.has(rule.from)) return;
+    if (rule.to == null && !rule.symbol) alternatives[variableIds.get(rule.from)].push("ε");
+    else if (rule.to != null && variableIds.has(rule.to)) {
+      alternatives[variableIds.get(rule.from)].push((rule.symbol ? rule.symbol + " " : "") + automataGrammarVariable(variableIds.get(rule.to)));
+    }
   });
-  model.accepts.forEach(function (state) { alternatives[state].push("ε"); });
-  output.textContent = alternatives.map(function (rules, i) { return "Q" + i + " → " + (rules.length ? rules.join(" | ") : "∅"); }).join("\n");
+  output.textContent = alternatives.map(function (rules, i) { return automataGrammarVariable(i) + " → " + (rules.length ? rules.join(" | ") : "∅"); }).join("\n");
   output.hidden = false;
-  automataStatusMessage = "Displayed an equivalent right-linear grammar; each Q-state corresponds to a state in this FSM.";
+    automataStatusMessage = machineType === "mealy"
+    ? "Displayed the right-linear trace grammar; each Mealy terminal is an input/output pair. Convert to DFA to get the accepted input language over the original alphabet."
+    : machineType === "moore"
+      ? "Displayed a right-linear grammar for the Moore machine's input language; states outputting 'accept' produce ε."
+      : "Displayed an equivalent right-linear grammar; each Q-state corresponds to a state in this FSM.";
+  if (machineType === "dfa" && grammarReport.dead.length) {
+    automataStatusMessage += " Removed nonaccepting dead state(s) " + grammarReport.dead.join(", ") + " and rules leading only to them; they cannot generate a terminal word.";
+  }
+  refreshAutomataPanel(true);
+}
+
+// Kleene's construction: view the right-linear grammar as its equivalent FSM,
+// add a fresh start/final pair, then eliminate the old state variables.
+function automataRegexEmpty() { return { k: "empty" }; }
+function automataRegexEps() { return { k: "eps" }; }
+function automataRegexLit(s) { return { k: "lit", s: s }; }
+function automataRegexAlt(a, b) {
+  if (a.k === "empty") return b; if (b.k === "empty" || JSON.stringify(a) === JSON.stringify(b)) return a;
+  return { k: "alt", a: a, b: b };
+}
+function automataRegexCat(a, b) {
+  if (a.k === "empty" || b.k === "empty") return automataRegexEmpty();
+  if (a.k === "eps") return b; if (b.k === "eps") return a;
+  return { k: "cat", a: a, b: b };
+}
+function automataRegexStar(a) {
+  if (a.k === "empty" || a.k === "eps") return automataRegexEps();
+  if (a.k === "star") return a;
+  return { k: "star", a: a };
+}
+function automataRegexRender(ast, syntax, parent) {
+  parent = parent || 0;
+  var prec = ast.k === "alt" ? 1 : ast.k === "cat" ? 2 : ast.k === "star" ? 3 : 4, s;
+  if (ast.k === "empty") s = "∅";
+  else if (ast.k === "eps") s = syntax === "theory" ? "ε" : "()";
+  else if (ast.k === "lit") {
+    var reserved = syntax === "theory" ? /[\\.|+*()$]/ : /[\\.^$|?*+()[\]{}]/;
+    s = reserved.test(ast.s) ? "\\" + ast.s : ast.s;
+  } else if (ast.k === "alt") s = automataRegexRender(ast.a, syntax, prec) + (syntax === "theory" ? "+" : "|") + automataRegexRender(ast.b, syntax, prec);
+  else if (ast.k === "cat") s = automataRegexRender(ast.a, syntax, prec) + automataRegexRender(ast.b, syntax, prec);
+  else s = automataRegexRender(ast.a, syntax, prec) + "*";
+  return prec < parent ? "(" + s + ")" : s;
+}
+
+function automataMinimizeDfa(model, alphabet) {
+  var n = model.nodes.length;
+  if (!n || model.starts.length !== 1) return model;
+  var transition = Array.from({ length: n }, function () { return new Map(); }), missing = false, invalid = false;
+  model.edges.forEach(function (edge) {
+    if (edge.from < 0 || edge.from >= n || edge.to < 0 || edge.to >= n) { invalid = true; return; }
+    var row = transition[edge.from], previous = row.get(edge.symbol);
+    if (previous != null && previous !== edge.to) invalid = true;
+    row.set(edge.symbol, edge.to);
+  });
+  alphabet.forEach(function (symbol) { transition.forEach(function (row) { if (!row.has(symbol)) missing = true; }); });
+  if (invalid) return model;
+  var sink = missing ? n : -1, total = n + (missing ? 1 : 0);
+  if (missing) {
+    transition.push(new Map());
+    alphabet.forEach(function (symbol) { transition[n].set(symbol, n); });
+    for (var state = 0; state < n; state++) alphabet.forEach(function (symbol) { if (!transition[state].has(symbol)) transition[state].set(symbol, sink); });
+  }
+  var reachable = new Set(), queue = [model.starts[0]];
+  while (queue.length) {
+    var current = queue.shift();
+    if (reachable.has(current) || current < 0 || current >= total) continue;
+    reachable.add(current);
+    alphabet.forEach(function (symbol) { queue.push(transition[current].get(symbol)); });
+  }
+  var accepting = new Set(model.accepts || []);
+  model.nodes.forEach(function (node, id) { if (node.accepting) accepting.add(id); });
+  var acceptingStates = [], rejectingStates = [];
+  Array.from(reachable).forEach(function (id) { (accepting.has(id) ? acceptingStates : rejectingStates).push(id); });
+  var groups = [];
+  if (acceptingStates.length) groups.push(acceptingStates);
+  if (rejectingStates.length) groups.push(rejectingStates);
+  var blockOf = new Array(total).fill(-1);
+  while (true) {
+    groups.forEach(function (group, block) { group.forEach(function (id) { blockOf[id] = block; }); });
+    var refined = [], signatures = new Map();
+    groups.forEach(function (group) {
+      group.forEach(function (id) {
+        var signature = (accepting.has(id) ? "1" : "0") + "|" + alphabet.map(function (symbol) { return blockOf[transition[id].get(symbol)]; }).join(",");
+        if (!signatures.has(signature)) { signatures.set(signature, []); refined.push(signatures.get(signature)); }
+        signatures.get(signature).push(id);
+      });
+    });
+    if (refined.length === groups.length) { groups = refined; break; }
+    groups = refined;
+  }
+  groups.forEach(function (group, block) { group.forEach(function (id) { blockOf[id] = block; }); });
+  var startBlock = blockOf[model.starts[0]], blockOrder = [startBlock], seenBlocks = new Set([startBlock]), cursor = 0;
+  while (cursor < blockOrder.length) {
+    var representative = groups[blockOrder[cursor]][0];
+    alphabet.forEach(function (symbol) {
+      var targetBlock = blockOf[transition[representative].get(symbol)];
+      if (!seenBlocks.has(targetBlock)) { seenBlocks.add(targetBlock); blockOrder.push(targetBlock); }
+    });
+    cursor++;
+  }
+  var newId = new Map(blockOrder.map(function (block, id) { return [block, id]; }));
+  var nodesOut = blockOrder.map(function (block, id) { return { id: id, name: "q" + id, accepting: accepting.has(groups[block][0]) }; });
+  var acceptsOut = nodesOut.filter(function (node) { return node.accepting; }).map(function (node) { return node.id; });
+  var edgesOut = [];
+  blockOrder.forEach(function (block, id) {
+    var representative = groups[block][0];
+    alphabet.forEach(function (symbol) { edgesOut.push({ from: id, to: newId.get(blockOf[transition[representative].get(symbol)]), symbol: symbol }); });
+  });
+  return { nodes: nodesOut, starts: [0], accepts: acceptsOut, edges: edgesOut, alphabet: alphabet.slice() };
+}
+
+function automataShowRegex(syntax) {
+  var machineType = automataSelectedType(), model = automataBuildModel(), output = document.getElementById("automata-grammar");
+  var alphabet = automataAlphabet(model);
+  if (machineType === "moore" && model.nodes.some(function (node) { return !node.output; })) { automataStatusMessage = "Give every Moore state an output before converting."; refreshAutomataPanel(true); return; }
+  if (machineType === "mealy" && model.edges.some(function (edge) { var p = automataTransitionParts(edge.symbol, machineType); return !p.symbol || !p.output; })) { automataStatusMessage = "Give every Mealy arrow an input/output label before converting."; refreshAutomataPanel(true); return; }
+  model = automataAcceptorFromModel(model, machineType, alphabet);
+  model = automataMinimizeDfa(model, alphabet);
+  if (!model.nodes.length || model.starts.length !== 1) {
+    automataStatusMessage = "A regular expression needs at least one state and exactly one start arrow.";
+    refreshAutomataPanel(true); return;
+  }
+  if (model.nodes.length > 48) {
+    automataStatusMessage = "Regex conversion is limited to 48 FSM states to keep the expression manageable.";
+    refreshAutomataPanel(true); return;
+  }
+  if (model.edges.some(function (e) { return !e.symbol || e.from == null || e.to == null; })) {
+    automataStatusMessage = "Add a symbol to every arrow before converting the grammar to a regex.";
+    refreshAutomataPanel(true); return;
+  }
+  if (model.edges.some(function (e) { return !automataEpsilon(e.symbol) && e.symbol.length !== 1; })) {
+    automataStatusMessage = "Regex conversion currently requires each input symbol to be one character.";
+    refreshAutomataPanel(true); return;
+  }
+  var n = model.nodes.length, start = n, accept = n + 1, R = Array.from({ length: n + 2 }, function () { return Array.from({ length: n + 2 }, automataRegexEmpty); });
+  R[start][model.starts[0]] = automataRegexEps();
+  model.accepts.forEach(function (q) { R[q][accept] = automataRegexEps(); });
+  model.edges.forEach(function (e) {
+    var label = automataEpsilon(e.symbol) ? automataRegexEps() : automataRegexLit(e.symbol);
+    R[e.from][e.to] = automataRegexAlt(R[e.from][e.to], label);
+  });
+  var alive = Array.from({ length: n + 2 }, function (_, i) { return i; });
+  for (var q = 0; q < n; q++) {
+    var loop = automataRegexStar(R[q][q]);
+    alive.forEach(function (i) {
+      if (i === q || R[i][q].k === "empty") return;
+      alive.forEach(function (j) {
+        if (j === q || R[q][j].k === "empty") return;
+        R[i][j] = automataRegexAlt(R[i][j], automataRegexCat(automataRegexCat(R[i][q], loop), R[q][j]));
+      });
+    });
+    alive.forEach(function (i) { R[i][q] = automataRegexEmpty(); R[q][i] = automataRegexEmpty(); });
+    alive = alive.filter(function (i) { return i !== q; });
+  }
+  var expression = automataRegexRender(R[start][accept], syntax);
+  if (expression.length > 20000) {
+    automataStatusMessage = "The equivalent regex exceeded 20,000 characters; simplify the FSM and try again.";
+    refreshAutomataPanel(true); return;
+  }
+  output.textContent = (syntax === "theory" ? "Formal theory regex: " : "Python-style regex: ") + expression;
+  output.hidden = false;
+  automataStatusMessage = "Converted the equivalent right-linear grammar to a regular expression by state elimination.";
   refreshAutomataPanel(true);
 }
 
@@ -1256,6 +2345,7 @@ function wireAutomataUI() {
   var mode = document.getElementById("automata-type"), alpha = document.getElementById("automata-alphabet");
   var validate = document.getElementById("automata-validate"), lean = document.getElementById("automata-lean"), convert = document.getElementById("automata-convert");
   var regexButton = document.getElementById("automata-regex-create"), grammarButton = document.getElementById("automata-to-grammar");
+  var pythonRegexButton = document.getElementById("automata-to-regex-python"), theoryRegexButton = document.getElementById("automata-to-regex-theory");
   if (!mode || mode.dataset.wired) return;
   mode.dataset.wired = "1";
   function saveSettings() {
@@ -1270,20 +2360,35 @@ function wireAutomataUI() {
   lean.addEventListener("click", function () {
     var model = automataBuildModel(), type = mode.value, report = automataAnalyze(model, type, automataAlphabet(model));
     if (!report.valid) { automataStatusMessage = "Resolve validation errors before Lean checking."; refreshAutomataPanel(true); return; }
+    var leanModel = model, leanType = type, leanAlphabet = report.alphabet;
+    if (type === "mealy" || type === "moore") {
+      var outputGrammar = automataOutputMachineToNfa(model, type, report.alphabet);
+      leanModel = automataAcceptorFromModel(outputGrammar.nfa, "nfa", outputGrammar.grammar.terminals);
+      leanType = "dfa";
+      leanAlphabet = outputGrammar.grammar.terminals;
+    }
     automataStatusMessage = "Checking this graph with PyPantograph…"; refreshAutomataPanel(true); lean.disabled = true;
-    fetch("/api/lean/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ automaton: model, alphabet: report.alphabet, type: type }) })
+    fetch("/api/lean/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ automaton: leanModel, alphabet: leanAlphabet, type: leanType }) })
       .then(function (response) { return response.json().then(function (body) { if (!response.ok) throw new Error(body.error || "Lean check failed"); return body; }); })
-      .then(function (body) { automataStatusMessage = body.lean && body.lean.ok ? "PyPantograph verified the Lean model." : ((body.lean && body.lean.message) || "PyPantograph could not verify this graph."); refreshAutomataPanel(true); })
+      .then(function (body) {
+        if (body.lean && body.lean.ok) automataStatusMessage = (type === "moore" || type === "mealy")
+          ? "Lean checked the DFA structure derived through the machine's right-linear Type 3 grammar; it did not prove the conversion semantics."
+          : "PyPantograph verified the Lean model.";
+        else automataStatusMessage = (body.lean && body.lean.message) || "PyPantograph could not verify this graph.";
+        refreshAutomataPanel(true);
+      })
       .catch(function (error) { automataStatusMessage = "Lean check unavailable: " + error.message; refreshAutomataPanel(true); })
       .finally(function () { lean.disabled = false; });
   });
   convert.addEventListener("click", function () {
-    try { automataConvertNfaToDfa(); }
+    try { automataConvertMachine(); }
     catch (error) { automataStatusMessage = error.message; refreshAutomataPanel(true); }
   });
   ensureRegexSyntaxSelect();
   regexButton.addEventListener("click", automataGenerateRegex);
   grammarButton.addEventListener("click", automataShowRegularGrammar);
+  pythonRegexButton.addEventListener("click", function () { automataShowRegex("python"); });
+  theoryRegexButton.addEventListener("click", function () { automataShowRegex("theory"); });
   refreshAutomataPanel(true);
 }
 
@@ -4285,707 +5390,3 @@ var Workspace = (function () {
     },
   };
 })();
-
-function Link(a, b) {
-  this.nodeA = a;
-  this.nodeB = b;
-  this.text = "";
-  this.lineAngleAdjust = 0; // value to add to textAngle when link is straight line
-  this.labelDx = 0; // manual label offset (Alt+drag)
-  this.labelDy = 0;
-
-  // make anchor point relative to the locations of nodeA and nodeB
-  this.parallelPart = 0.5; // percentage from nodeA to nodeB
-  this.perpendicularPart = 0; // pixels from line between nodeA and nodeB
-  this.curvePoints = null; // three route handles for the whole link
-}
-
-Link.prototype._curvePageBreaks = function (start, end) {
-  var ph = typeof pageHeightPx === "function" ? pageHeightPx() : 1056;
-  var lo = Math.min(start.y, end.y), hi = Math.max(start.y, end.y);
-  var breaks = [0, 1];
-  if (Math.abs(end.y - start.y) > 1e-6) {
-    for (var y = (Math.floor(lo / ph) + 1) * ph; y < hi - 1e-6; y += ph) {
-      var t = (y - start.y) / (end.y - start.y);
-      if (t > 1e-6 && t < 1 - 1e-6) breaks.push(t);
-    }
-  }
-  breaks.sort(function (a, b) { return a - b; });
-  return breaks;
-};
-
-Link.prototype._linkCenters = function () {
-  var ph = pageHeightPx(), gap = (pageMargins.top + pageMargins.bottom) * PX_PER_INCH;
-  var reach = Math.max(nodeRadius, styleStateFontSize * 0.75) + 2;
-  function candidates(node) {
-    var out = [{ x: node.x, y: node.y }];
-    for (var p = 0; p + 1 < pageCount; p++) {
-      var nextTop = (p + 1) * ph + pageMargins.top * PX_PER_INCH;
-      var priorBottom = (p + 1) * ph - pageMargins.bottom * PX_PER_INCH;
-      if (Math.abs(node.y - nextTop) <= reach) out.push({ x: node.x, y: node.y - gap });
-      if (Math.abs(node.y - priorBottom) <= reach) out.push({ x: node.x, y: node.y + gap });
-    }
-    return out;
-  }
-  function choose(node, highY) {
-    var list = candidates(node), best = list[0];
-    for (var i = 1; i < list.length; i++) {
-      if (highY ? list[i].y > best.y : list[i].y < best.y) best = list[i];
-    }
-    return best;
-  }
-  // When either state straddles a page seam, route from the fragment on the
-  // source side toward the fragment on the destination side. This lets the
-  // curve continue across the printable-area gap instead of ending in it.
-  var down = this.nodeB.y >= this.nodeA.y;
-  var a = choose(this.nodeA, !down), b = choose(this.nodeB, down);
-  return { a: a, b: b };
-};
-
-Link.prototype._visibleCirclePoint = function (node, center, toward, inset, preferredPage) {
-  var radius = nodeRadius;
-  if (!constrainToMargins || typeof pageHeightPx !== "function" || typeof pageWidthPx !== "function") {
-    var vx = toward.x - center.x, vy = toward.y - center.y;
-    var vl = Math.sqrt(vx * vx + vy * vy) || 1;
-    return { x: center.x + vx / vl * radius, y: center.y + vy / vl * radius };
-  }
-  var ph = pageHeightPx();
-  var pad = Math.max(0, inset || 0) + Math.max(1, styleLineWidth || 1);
-  var left = pageMargins.left * PX_PER_INCH + pad;
-  var right = pageWidthPx() - pageMargins.right * PX_PER_INCH - pad;
-  var reach = Math.max(radius, styleStateFontSize * 0.75) + 2;
-  var gap = (pageMargins.top + pageMargins.bottom) * PX_PER_INCH;
-  var circleCenters = [{ x: node.x, y: node.y }];
-  for (var p = 0; p + 1 < pageCount; p++) {
-    var nextTop = (p + 1) * ph + pageMargins.top * PX_PER_INCH;
-    var priorBottom = (p + 1) * ph - pageMargins.bottom * PX_PER_INCH;
-    if (Math.abs(node.y - nextTop) <= reach) circleCenters.push({ x: node.x, y: node.y - gap });
-    if (Math.abs(node.y - priorBottom) <= reach) circleCenters.push({ x: node.x, y: node.y + gap });
-  }
-  preferredPage = preferredPage == null
-    ? Math.max(0, Math.min(pageCount - 1, Math.floor(node.y / ph)))
-    : Math.max(0, Math.min(pageCount - 1, preferredPage));
-  var best = null, bestScore = Infinity;
-  // Check every rendered fragment of a split state, preferring the fragment
-  // at the state's actual page position. That lets an arrow from page 2 attach
-  // to the visible page 1 arc instead of being stuck on its duplicate.
-  circleCenters.forEach(function (circleCenter) {
-    var page = Math.max(0, Math.min(pageCount - 1, Math.floor(circleCenter.y / ph)));
-    var top = page * ph + pageMargins.top * PX_PER_INCH + pad;
-    var bottom = (page + 1) * ph - pageMargins.bottom * PX_PER_INCH - pad;
-    var targetAngle = Math.atan2(toward.y - circleCenter.y, toward.x - circleCenter.x);
-    for (var i = 0; i < 720; i++) {
-      var angle = Math.PI * 2 * i / 720;
-      var x = circleCenter.x + Math.cos(angle) * radius, y = circleCenter.y + Math.sin(angle) * radius;
-      if (x < left || x > right || y < top || y > bottom) continue;
-      var delta = Math.atan2(Math.sin(angle - targetAngle), Math.cos(angle - targetAngle));
-      var score = Math.abs(page - preferredPage) * 100 + delta * delta;
-      if (score < bestScore) { bestScore = score; best = { x: x, y: y }; }
-    }
-  });
-  if (best) return best;
-  var dx = toward.x - center.x, dy = toward.y - center.y, length = Math.sqrt(dx * dx + dy * dy) || 1;
-  return { x: center.x + dx / length * radius, y: center.y + dy / length * radius };
-};
-
-Link.prototype._ensureCurvePoints = function (count, pageBreaks) {
-  var centers = this._linkCenters();
-  var dx = centers.b.x - centers.a.x, dy = centers.b.y - centers.a.y;
-  var length = Math.sqrt(dx * dx + dy * dy) || 1;
-  // Convert saved per-page cubic handles to three whole-link handles. This
-  // keeps imported older links editable while dropping the page-count-based UI.
-  if (Array.isArray(this.curvePoints) && this.curvePoints.length && typeof this.curvePoints[0].t !== "number") {
-    var oldBreaks = pageBreaks || this._curvePageBreaks(centers.a, centers.b);
-    var oldHandles = [];
-    this.curvePoints.forEach(function (seg, i) {
-      if (!seg || !seg.c1 || !seg.c2) return;
-      [seg.c1, seg.c2].forEach(function (point) {
-        var t0 = oldBreaks[i], t1 = oldBreaks[i + 1];
-        var px = centers.a.x + dx * (t0 + (t1 - t0) * point.parallel) - (dy / length) * point.perpendicular;
-        var py = centers.a.y + dy * (t0 + (t1 - t0) * point.parallel) + (dx / length) * point.perpendicular;
-        var t = ((px - centers.a.x) * dx + (py - centers.a.y) * dy) / (length * length);
-        var perp = (dx * (py - centers.a.y) - dy * (px - centers.a.x)) / length;
-        oldHandles.push({ t: t, perpendicular: perp });
-      });
-    });
-    oldHandles.sort(function (a, b) { return a.t - b.t; });
-    this.curvePoints = [0.25, 0.5, 0.75].map(function (target) {
-      if (!oldHandles.length) return { t: target, perpendicular: 0 };
-      var best = oldHandles[0];
-      oldHandles.forEach(function (point) { if (Math.abs(point.t - target) < Math.abs(best.t - target)) best = point; });
-      return { t: target, perpendicular: best.perpendicular };
-    });
-  }
-  if (!Array.isArray(this.curvePoints)) this.curvePoints = [];
-  if (!this.curvePoints.length) {
-    var base = this.perpendicularPart || 0;
-    this.curvePoints = [0.25, 0.5, 0.75].map(function (t) { return { t: t, perpendicular: base * (1 - Math.abs(2 * t - 1)) }; });
-  }
-};
-
-Link.prototype.getCurveHandles = function () {
-  if (!this.perpendicularPart && !this.curvePoints) return [];
-  var centers = this._linkCenters();
-  this._ensureCurvePoints();
-  var dx = centers.b.x - centers.a.x, dy = centers.b.y - centers.a.y;
-  var length = Math.sqrt(dx * dx + dy * dy) || 1;
-  return this.curvePoints.map(function (point, i) {
-    return {
-      x: centers.a.x + dx * point.t - (dy / length) * point.perpendicular,
-      y: centers.a.y + dy * point.t + (dx / length) * point.perpendicular,
-      segment: i,
-    };
-  });
-};
-
-Link.prototype.moveCurveHandle = function (handleIndex, x, y) {
-  var handles = this.getCurveHandles();
-  var handle = handles[handleIndex];
-  if (!handle) return;
-  var centers = this._linkCenters();
-  var dx = centers.b.x - centers.a.x, dy = centers.b.y - centers.a.y;
-  var length2 = dx * dx + dy * dy || 1;
-  if (typeof pageHeightPx === "function") {
-    x = Math.max(2, Math.min(pageWidthPx() - 2, x));
-    y = Math.max(2, Math.min(pageCount * pageHeightPx() - 2, y));
-  }
-  var parallel = ((x - centers.a.x) * dx + (y - centers.a.y) * dy) / length2;
-  var perpendicular = (dx * (y - centers.a.y) - dy * (x - centers.a.x)) / Math.sqrt(length2);
-  var spec = this.curvePoints[handle.segment];
-  spec.t = Math.max(-0.5, Math.min(1.5, parallel));
-  spec.perpendicular = Math.max(-pageHeightPx(), Math.min(pageHeightPx(), perpendicular));
-  this.perpendicularPart = Math.abs(spec.perpendicular) > 0.5 ? this.perpendicularPart || 1 : this.perpendicularPart;
-};
-
-Link.prototype.getAnchorPoint = function () {
-  var dx = this.nodeB.x - this.nodeA.x;
-  var dy = this.nodeB.y - this.nodeA.y;
-  var scale = Math.sqrt(dx * dx + dy * dy);
-  if (scale < 1e-6) return { x: this.nodeA.x, y: this.nodeA.y };
-  var x =
-    this.nodeA.x +
-    dx * this.parallelPart -
-    (dy * this.perpendicularPart) / scale;
-  var y =
-    this.nodeA.y +
-    dy * this.parallelPart +
-    (dx * this.perpendicularPart) / scale;
-  var padding = Math.max(2, styleLineWidth || 1);
-  var maxX = typeof pageWidthPx === "function" ? pageWidthPx() - padding : Infinity;
-  var maxY = typeof pageHeightPx === "function" && typeof pageCount !== "undefined"
-    ? pageHeightPx() * pageCount - padding
-    : Infinity;
-  return {
-    x: Math.max(padding, Math.min(maxX, x)),
-    y: Math.max(padding, Math.min(maxY, y)),
-  };
-};
-
-Link.prototype.setAnchorPoint = function (x, y) {
-  var previousPerpendicular = this.perpendicularPart;
-  var dx = this.nodeB.x - this.nodeA.x;
-  var dy = this.nodeB.y - this.nodeA.y;
-  var scale = Math.sqrt(dx * dx + dy * dy);
-  if (scale < 1e-6) return;
-  if (typeof pageWidthPx === "function" && typeof pageHeightPx === "function") {
-    x = Math.max(2, Math.min(pageWidthPx() - 2, x));
-    y = Math.max(2, Math.min(pageHeightPx() * pageCount - 2, y));
-  }
-  this.parallelPart =
-    (dx * (x - this.nodeA.x) + dy * (y - this.nodeA.y)) / (scale * scale);
-  this.perpendicularPart =
-    (dx * (y - this.nodeA.y) - dy * (x - this.nodeA.x)) / scale;
-  // Dragging the curve itself moves every page segment with the legacy anchor.
-  // Keep the whole-link handles moving with the legacy curve anchor.
-  if (Array.isArray(this.curvePoints) && this.curvePoints.length) {
-    var delta = this.perpendicularPart - previousPerpendicular;
-    this.curvePoints.forEach(function (point) { if (point && typeof point.perpendicular === "number") point.perpendicular += delta; });
-  }
-  // snap to a straight line
-  if (
-    this.parallelPart > 0 &&
-    this.parallelPart < 1 &&
-    Math.abs(this.perpendicularPart) < snapToPadding
-  ) {
-    this.lineAngleAdjust = (this.perpendicularPart < 0) * Math.PI;
-    this.perpendicularPart = 0;
-  }
-};
-
-Link.prototype.getEndPointsAndCircle = function () {
-  if (this.perpendicularPart == 0 && !this.curvePoints) {
-    var midX = (this.nodeA.x + this.nodeB.x) / 2;
-    var midY = (this.nodeA.y + this.nodeB.y) / 2;
-    var start = this.nodeA.closestPointOnCircle(midX, midY);
-    var end = this.nodeB.closestPointOnCircle(midX, midY);
-    return {
-      hasCircle: false,
-      startX: start.x,
-      startY: start.y,
-      endX: end.x,
-      endY: end.y,
-    };
-  }
-  var anchor = this.getAnchorPoint();
-  // A quadratic curve uses the dragged anchor as its control point. Unlike a
-  // circumcircle through the anchor, the curve stays inside the convex hull
-  // of its endpoints and control point, so it cannot balloon off the paper.
-  var centers = this._linkCenters();
-  var a = centers.a, b = centers.b;
-  var handles = this.getCurveHandles();
-  var first = handles[0] || anchor, last = handles[handles.length - 1] || anchor;
-  var ax = first.x - a.x, ay = first.y - a.y;
-  var bx = b.x - last.x, by = b.y - last.y;
-  var al = Math.sqrt(ax * ax + ay * ay), bl = Math.sqrt(bx * bx + by * by);
-  if (al < 1e-6) { ax = b.x - a.x; ay = b.y - a.y; al = Math.sqrt(ax * ax + ay * ay) || 1; }
-  if (bl < 1e-6) { bx = b.x - a.x; by = b.y - a.y; bl = Math.sqrt(bx * bx + by * by) || 1; }
-  var sourcePage = Math.max(0, Math.min(pageCount - 1, Math.floor(a.y / pageHeightPx())));
-  var start = this._visibleCirclePoint(this.nodeA, a, { x: a.x + ax, y: a.y + ay }, 0, sourcePage);
-  // The final route handle selects which visible copy of a split destination
-  // receives the arrowhead. Dragging that handle across a page break switches
-  // between the page fragments instead of locking the tip to the source page.
-  var targetPage = Math.max(0, Math.min(pageCount - 1, Math.floor(last.y / pageHeightPx())));
-  var end = this._visibleCirclePoint(this.nodeB, b, { x: b.x - bx, y: b.y - by }, styleArrowSize || 0, targetPage);
-  var startX = start.x, startY = start.y;
-  var endX = end.x, endY = end.y;
-  // The three route handles shape one continuous curve. Page clipping cuts
-  // that curve at printable boundaries, so the number of pages never adds dots.
-  this._ensureCurvePoints();
-  handles = this.getCurveHandles();
-  var route = [{ x: startX, y: startY }].concat(handles, [{ x: endX, y: endY }]);
-  var segments = [];
-  for (var si = 0; si < route.length - 1; si++) {
-    var previous = route[Math.max(0, si - 1)], current = route[si];
-    var next = route[si + 1], following = route[Math.min(route.length - 1, si + 2)];
-    segments.push({
-      startX: current.x, startY: current.y,
-      endX: next.x, endY: next.y,
-      control1X: current.x + (next.x - previous.x) / 6,
-      control1Y: current.y + (next.y - previous.y) / 6,
-      control2X: next.x - (following.x - current.x) / 6,
-      control2Y: next.y - (following.y - current.y) / 6,
-    });
-  }
-  return {
-    hasCircle: false,
-    hasCurve: true,
-    startX: startX,
-    startY: startY,
-    endX: endX,
-    endY: endY,
-    controlX: anchor.x,
-    controlY: anchor.y,
-    segments: segments,
-  };
-};
-
-Link.prototype.draw = function (c) {
-  var stuff = this.getEndPointsAndCircle();
-  // draw arc
-  c.beginPath();
-  if (stuff.hasCircle) {
-    c.arc(
-      stuff.circleX,
-      stuff.circleY,
-      stuff.circleRadius,
-      stuff.startAngle,
-      stuff.endAngle,
-      stuff.isReversed,
-    );
-  } else if (stuff.hasCurve) {
-    c.moveTo(stuff.startX, stuff.startY);
-    for (var si = 0; si < stuff.segments.length; si++) {
-      var segment = stuff.segments[si];
-      c.bezierCurveTo(segment.control1X, segment.control1Y, segment.control2X, segment.control2Y, segment.endX, segment.endY);
-    }
-  } else {
-    c.moveTo(stuff.startX, stuff.startY);
-    c.lineTo(stuff.endX, stuff.endY);
-  }
-  c.stroke();
-  // draw the head of the arrow
-  if (stuff.hasCurve) {
-    var finalSegment = stuff.segments[stuff.segments.length - 1];
-    var tangentX = stuff.endX - finalSegment.control2X;
-    var tangentY = stuff.endY - finalSegment.control2Y;
-    drawArrow(c, stuff.endX, stuff.endY, Math.atan2(tangentY, tangentX));
-  } else if (stuff.hasCircle) {
-    drawArrow(
-      c,
-      stuff.endX,
-      stuff.endY,
-      stuff.endAngle - stuff.reverseScale * (Math.PI / 2),
-    );
-  } else {
-    drawArrow(
-      c,
-      stuff.endX,
-      stuff.endY,
-      Math.atan2(stuff.endY - stuff.startY, stuff.endX - stuff.startX),
-    );
-  }
-  // draw the text
-  if (stuff.hasCurve) {
-    var middle = stuff.segments[Math.floor(stuff.segments.length / 2)];
-    var textX = (middle.startX + 3 * middle.control1X + 3 * middle.control2X + middle.endX) / 8;
-    var textY = (middle.startY + 3 * middle.control1Y + 3 * middle.control2Y + middle.endY) / 8;
-    var textAngle = Math.atan2(stuff.endY - stuff.startY, stuff.endX - stuff.startX);
-    drawText(c, this.text, textX + this.labelDx, textY + this.labelDy, textAngle, selectedObject == this);
-  } else if (stuff.hasCircle) {
-    var startAngle = stuff.startAngle;
-    var endAngle = stuff.endAngle;
-    if (endAngle < startAngle) {
-      endAngle += Math.PI * 2;
-    }
-    var textAngle = (startAngle + endAngle) / 2 + stuff.isReversed * Math.PI;
-    var textX = stuff.circleX + stuff.circleRadius * Math.cos(textAngle);
-    var textY = stuff.circleY + stuff.circleRadius * Math.sin(textAngle);
-    drawText(
-      c,
-      this.text,
-      textX + this.labelDx,
-      textY + this.labelDy,
-      textAngle,
-      selectedObject == this,
-    );
-  } else {
-    var textX = (stuff.startX + stuff.endX) / 2;
-    var textY = (stuff.startY + stuff.endY) / 2;
-    var textAngle = Math.atan2(
-      stuff.endX - stuff.startX,
-      stuff.startY - stuff.endY,
-    );
-    drawText(
-      c,
-      this.text,
-      textX + this.labelDx,
-      textY + this.labelDy,
-      textAngle + this.lineAngleAdjust,
-      selectedObject == this,
-    );
-  }
-  if (stuff.hasCurve && (c.canvas !== canvas ? includeCurveHandlesInExports : false)) this.drawCurveHandles(c);
-};
-
-Link.prototype.drawCurveHandles = function (c) {
-  var handles = this.getCurveHandles();
-  c.save(); c.fillStyle = "white"; c.strokeStyle = "black"; c.lineWidth = 2;
-  for (var i = 0; i < handles.length; i++) {
-    if (typeof c.drawCurveHandle === "function") c.drawCurveHandle(handles[i].x, handles[i].y, 6);
-    else { c.beginPath(); c.arc(handles[i].x, handles[i].y, 6, 0, Math.PI * 2); c.fill(); c.stroke(); }
-  }
-  c.restore();
-};
-
-Link.prototype.containsPoint = function (x, y, extraTolerance) {
-  var tolerance = hitTargetPadding + (extraTolerance || 0);
-  var stuff = this.getEndPointsAndCircle();
-  if (stuff.hasCircle) {
-    var dx = x - stuff.circleX;
-    var dy = y - stuff.circleY;
-    var distance = Math.sqrt(dx * dx + dy * dy) - stuff.circleRadius;
-    if (Math.abs(distance) < tolerance) {
-      var angle = Math.atan2(dy, dx);
-      var startAngle = stuff.startAngle;
-      var endAngle = stuff.endAngle;
-      if (stuff.isReversed) {
-        var temp = startAngle;
-        startAngle = endAngle;
-        endAngle = temp;
-      }
-      if (endAngle < startAngle) {
-        endAngle += Math.PI * 2;
-      }
-      if (angle < startAngle) {
-        angle += Math.PI * 2;
-      } else if (angle > endAngle) {
-        angle -= Math.PI * 2;
-      }
-      return angle > startAngle && angle < endAngle;
-    }
-  } else if (stuff.hasCurve) {
-    for (var si = 0; si < stuff.segments.length; si++) {
-      var seg = stuff.segments[si], previous = { x: seg.startX, y: seg.startY };
-      for (var i = 1; i <= 24; i++) {
-        var t = i / 24, u = 1 - t;
-        var current = {
-          x: u * u * u * seg.startX + 3 * u * u * t * seg.control1X + 3 * u * t * t * seg.control2X + t * t * t * seg.endX,
-          y: u * u * u * seg.startY + 3 * u * u * t * seg.control1Y + 3 * u * t * t * seg.control2Y + t * t * t * seg.endY,
-        };
-        var dx = current.x - previous.x, dy = current.y - previous.y;
-        var length2 = dx * dx + dy * dy;
-        var percent = length2 ? Math.max(0, Math.min(1, ((x - previous.x) * dx + (y - previous.y) * dy) / length2)) : 0;
-        var distanceX = x - (previous.x + percent * dx), distanceY = y - (previous.y + percent * dy);
-        if (Math.sqrt(distanceX * distanceX + distanceY * distanceY) < tolerance) return true;
-        previous = current;
-      }
-    }
-  } else {
-    var dx = stuff.endX - stuff.startX;
-    var dy = stuff.endY - stuff.startY;
-    var length = Math.sqrt(dx * dx + dy * dy);
-    var percent =
-      (dx * (x - stuff.startX) + dy * (y - stuff.startY)) / (length * length);
-    var distance = (dx * (y - stuff.startY) - dy * (x - stuff.startX)) / length;
-    return percent > 0 && percent < 1 && Math.abs(distance) < tolerance;
-  }
-  return false;
-};
-
-Link.prototype.getCurveHandleAt = function (x, y) {
-  if (!showCurveHandles || this !== selectedObject || (!this.perpendicularPart && !this.curvePoints)) return -1;
-  var handles = this.getCurveHandles();
-  for (var i = handles.length - 1; i >= 0; i--) {
-    var dx = handles[i].x - x, dy = handles[i].y - y;
-    if (dx * dx + dy * dy <= 12 * 12) return i;
-  }
-  return -1;
-};
-
-function Node(x, y) {
-  this.x = x;
-  this.y = y;
-  this.mouseOffsetX = 0;
-  this.mouseOffsetY = 0;
-  this.isAcceptState = false;
-  this.text = "";
-}
-
-Node.prototype.setMouseStart = function (x, y) {
-  this.mouseOffsetX = this.x - x;
-  this.mouseOffsetY = this.y - y;
-};
-
-Node.prototype.setAnchorPoint = function (x, y) {
-  this.x = x + this.mouseOffsetX;
-  this.y = y + this.mouseOffsetY;
-};
-
-Node.prototype.draw = function (c) {
-  // draw the circle
-  c.beginPath();
-  c.arc(this.x, this.y, nodeRadius, 0, 2 * Math.PI, false);
-  c.stroke();
-
-  // draw the text
-  drawText(c, this.text, this.x, this.y, null, selectedObject == this);
-
-  // draw a double circle for an accept state
-  if (this.isAcceptState) {
-    c.beginPath();
-    c.arc(this.x, this.y, nodeRadius - 6, 0, 2 * Math.PI, false);
-    c.stroke();
-  }
-};
-
-Node.prototype.closestPointOnCircle = function (x, y) {
-  var dx = x - this.x;
-  var dy = y - this.y;
-  var scale = Math.sqrt(dx * dx + dy * dy);
-  return {
-    x: this.x + (dx * nodeRadius) / scale,
-    y: this.y + (dy * nodeRadius) / scale,
-  };
-};
-
-Node.prototype.containsPoint = function (x, y, extraTolerance) {
-  var radius = nodeRadius + (extraTolerance || 0);
-  return (
-    (x - this.x) * (x - this.x) + (y - this.y) * (y - this.y) < radius * radius
-  );
-};
-
-function SelfLink(node, mouse) {
-  this.node = node;
-  this.anchorAngle = 0;
-  this.mouseOffsetAngle = 0;
-  this.text = "";
-  this.labelDx = 0;
-  this.labelDy = 0;
-
-  if (mouse) {
-    this.setAnchorPoint(mouse.x, mouse.y);
-  }
-}
-
-SelfLink.prototype.setMouseStart = function (x, y) {
-  this.mouseOffsetAngle =
-    this.anchorAngle - Math.atan2(y - this.node.y, x - this.node.x);
-};
-
-SelfLink.prototype.setAnchorPoint = function (x, y) {
-  this.anchorAngle =
-    Math.atan2(y - this.node.y, x - this.node.x) + this.mouseOffsetAngle;
-  // snap to 90 degrees
-  var snap = Math.round(this.anchorAngle / (Math.PI / 2)) * (Math.PI / 2);
-  if (Math.abs(this.anchorAngle - snap) < 0.1) this.anchorAngle = snap;
-  // keep in the range -pi to pi so our containsPoint() function always works
-  if (this.anchorAngle < -Math.PI) this.anchorAngle += 2 * Math.PI;
-  if (this.anchorAngle > Math.PI) this.anchorAngle -= 2 * Math.PI;
-};
-
-SelfLink.prototype.getEndPointsAndCircle = function () {
-  var circleX = this.node.x + 1.5 * nodeRadius * Math.cos(this.anchorAngle);
-  var circleY = this.node.y + 1.5 * nodeRadius * Math.sin(this.anchorAngle);
-  var circleRadius = 0.75 * nodeRadius;
-  var startAngle = this.anchorAngle - Math.PI * 0.8;
-  var endAngle = this.anchorAngle + Math.PI * 0.8;
-  var startX = circleX + circleRadius * Math.cos(startAngle);
-  var startY = circleY + circleRadius * Math.sin(startAngle);
-  var endX = circleX + circleRadius * Math.cos(endAngle);
-  var endY = circleY + circleRadius * Math.sin(endAngle);
-  return {
-    hasCircle: true,
-    startX: startX,
-    startY: startY,
-    endX: endX,
-    endY: endY,
-    startAngle: startAngle,
-    endAngle: endAngle,
-    circleX: circleX,
-    circleY: circleY,
-    circleRadius: circleRadius,
-  };
-};
-
-SelfLink.prototype.draw = function (c) {
-  var stuff = this.getEndPointsAndCircle();
-  // draw arc
-  c.beginPath();
-  c.arc(
-    stuff.circleX,
-    stuff.circleY,
-    stuff.circleRadius,
-    stuff.startAngle,
-    stuff.endAngle,
-    false,
-  );
-  c.stroke();
-  // draw the text on the loop farthest from the node
-  var textX = stuff.circleX + stuff.circleRadius * Math.cos(this.anchorAngle);
-  var textY = stuff.circleY + stuff.circleRadius * Math.sin(this.anchorAngle);
-  drawText(
-    c,
-    this.text,
-    textX + this.labelDx,
-    textY + this.labelDy,
-    this.anchorAngle,
-    selectedObject == this,
-  );
-  // draw the head of the arrow
-  drawArrow(c, stuff.endX, stuff.endY, stuff.endAngle + Math.PI * 0.4);
-};
-
-SelfLink.prototype.containsPoint = function (x, y, extraTolerance) {
-  var stuff = this.getEndPointsAndCircle();
-  var dx = x - stuff.circleX;
-  var dy = y - stuff.circleY;
-  var distance = Math.sqrt(dx * dx + dy * dy) - stuff.circleRadius;
-  return Math.abs(distance) < hitTargetPadding + (extraTolerance || 0);
-};
-
-function StartLink(node, start) {
-  this.node = node;
-  this.deltaX = 0;
-  this.deltaY = 0;
-  this.text = "";
-  this.labelDx = 0;
-  this.labelDy = 0;
-
-  if (start) {
-    this.setAnchorPoint(start.x, start.y);
-  }
-}
-
-StartLink.prototype.setAnchorPoint = function (x, y) {
-  this.deltaX = x - this.node.x;
-  this.deltaY = y - this.node.y;
-
-  if (Math.abs(this.deltaX) < snapToPadding) {
-    this.deltaX = 0;
-  }
-
-  if (Math.abs(this.deltaY) < snapToPadding) {
-    this.deltaY = 0;
-  }
-};
-
-StartLink.prototype.getEndPoints = function () {
-  // Imported/generated start arrows may omit their anchor offset. A zero
-  // vector also makes closestPointOnCircle divide by zero, so give those
-  // arrows a visible default entry from above the state.
-  if (!isFinite(this.deltaX)) this.deltaX = 0;
-  if (!isFinite(this.deltaY)) this.deltaY = 0;
-  if (Math.sqrt(this.deltaX * this.deltaX + this.deltaY * this.deltaY) < 1e-6) {
-    this.deltaX = 0;
-    this.deltaY = -Math.max(50, nodeRadius * 2);
-  }
-  var startX = this.node.x + this.deltaX;
-  var startY = this.node.y + this.deltaY;
-  var end = this.node.closestPointOnCircle(startX, startY);
-  return {
-    startX: startX,
-    startY: startY,
-    endX: end.x,
-    endY: end.y,
-  };
-};
-
-StartLink.prototype.draw = function (c) {
-  var stuff = this.getEndPoints();
-
-  // draw the line
-  c.beginPath();
-  c.moveTo(stuff.startX, stuff.startY);
-  c.lineTo(stuff.endX, stuff.endY);
-  c.stroke();
-
-  // draw the text at the end without the arrow
-  var textAngle = Math.atan2(
-    stuff.startY - stuff.endY,
-    stuff.startX - stuff.endX,
-  );
-  drawText(
-    c,
-    this.text,
-    stuff.startX + this.labelDx,
-    stuff.startY + this.labelDy,
-    textAngle,
-    selectedObject == this,
-  );
-
-  // draw the head of the arrow
-  drawArrow(c, stuff.endX, stuff.endY, Math.atan2(-this.deltaY, -this.deltaX));
-};
-
-StartLink.prototype.containsPoint = function (x, y, extraTolerance) {
-  var stuff = this.getEndPoints();
-  var dx = stuff.endX - stuff.startX;
-  var dy = stuff.endY - stuff.startY;
-  var length = Math.sqrt(dx * dx + dy * dy);
-  var percent =
-    (dx * (x - stuff.startX) + dy * (y - stuff.startY)) / (length * length);
-  var distance = (dx * (y - stuff.startY) - dy * (x - stuff.startX)) / length;
-  return percent > 0 && percent < 1 && Math.abs(distance) < hitTargetPadding + (extraTolerance || 0);
-};
-
-function TemporaryLink(from, to) {
-  this.from = from;
-  this.to = to;
-}
-
-TemporaryLink.prototype.draw = function (c) {
-  // draw the line
-  c.beginPath();
-  c.moveTo(this.to.x, this.to.y);
-  c.lineTo(this.from.x, this.from.y);
-  c.stroke();
-
-  // draw the head of the arrow
-  drawArrow(
-    c,
-    this.to.x,
-    this.to.y,
-    Math.atan2(this.to.y - this.from.y, this.to.x - this.from.x),
-  );
-};
