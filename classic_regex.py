@@ -33,6 +33,10 @@ def _tokenize(pattern):
             tokens.append(("space",))
             i += 1
             continue
+        if ch == "ε":
+            tokens.append(("epsilon",))
+            i += 1
+            continue
         if ch in ".|+*()$":
             tokens.append(("op", ch))
             i += 1
@@ -120,7 +124,7 @@ class _Parser:
             break
         if not parts:
             raise ClassicRegexSyntaxError(
-                "Expected a character, '(', or 'epsilon'/'$' here - "
+                "Expected a character, '(', or epsilon/'$' here - "
                 "write 'epsilon' or '$' explicitly if you mean the empty string"
             )
         node = parts[0]

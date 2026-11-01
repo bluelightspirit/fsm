@@ -2,12 +2,12 @@
 
 Two regex dialects, chosen by "syntax" in the request payload:
 
-  "python" (default): Python-style sugar - literals, `.`, \\d \\w \\s, [...] classes, `|`, `* + ?`,
-      groups. Built with a Glushkov (position) automaton in glushkov_regex.py / glushkov_core.py:
-      no epsilon edges, and a character class is ONE symbol instead of one branch per character.
+  "python" (default): Parsed and compiled by Pyformlang's PythonRegex implementation.
+      Supports Python-style operators, character classes, shortcuts, and bounded repetitions;
+      character classes are expanded to concrete character symbols.
 
   "theory" (EXPERIMENTAL): textbook regular expressions. Every character is its own symbol
-      (`abb` is a, b, b); union is `+` or `|`, star is `*`, `epsilon` or `$` is the empty string,
+      (`abb` is a, b, b); union is `+` or `|`, star is `*`, `ε`, `epsilon` or `$` is the empty string,
       grouping with parentheses. Parsed by classic_regex.py and compiled to an epsilon-NFA by
       thompson_port.py, a Python port of the Lean implementation in lean_regex_check.py, so the
       "Verify with Lean" button can check that the two agree. DFA output uses subset
@@ -22,8 +22,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import glushkov_regex
-from glushkov_core import determinize
 from classic_regex import parse_classic_regex, ClassicRegexSyntaxError
 from thompson_port import compile_regex
 
@@ -90,6 +88,44 @@ def _build_theory_nfa(expression: str) -> dict[str, Any]:
         "edges": edges,
         "alphabet": sorted(alphabet),
     }
+
+
+def _pyformlang_to_dict(automaton: Any) -> dict[str, Any]:
+    """Convert a Pyformlang automaton to the editor's stable integer-ID format."""
+    from pyformlang.finite_automaton import Epsilon
+
+    states = sorted(automaton.states, key=lambda state: (type(state.value).__name__, repr(state.value)))
+    state_id = {state: index for index, state in enumerate(states)}
+    alphabet = sorted((symbol.value for symbol in automaton.symbols), key=str)
+    edges = []
+    for source in states:
+        for symbol in sorted(automaton.symbols, key=lambda item: str(item.value)):
+            for target in automaton(source, symbol):
+                edges.append({"from": state_id[source], "to": state_id[target], "symbol": symbol.value})
+        for target in automaton(source, Epsilon()):
+            edges.append({"from": state_id[source], "to": state_id[target], "symbol": "\u03b5"})
+
+    return {
+        "states": len(states),
+        "starts": sorted(state_id[state] for state in automaton.start_states),
+        "accepts": sorted(state_id[state] for state in automaton.final_states),
+        "edges": edges,
+        "alphabet": alphabet,
+    }
+
+
+def _build_python_nfa(expression: str) -> Any:
+    """Use Pyformlang's PythonRegex parser and its Thompson ε-NFA construction."""
+    try:
+        from pyformlang.regular_expression import PythonRegex
+    except ImportError as exc:
+        raise ValueError("Python-style regex conversion requires Pyformlang 1.0.11. Run `python -m pip install --upgrade -r requirements.txt` and restart the server.") from exc
+    try:
+        return PythonRegex(expression).to_epsilon_nfa()
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"Could not parse that Python-style regex: {str(exc)[:400]}") from exc
 
 
 def _determinize_theory(nfa: dict[str, Any]) -> dict[str, Any]:
@@ -170,20 +206,15 @@ def regex_to_automaton(payload: dict[str, Any]) -> dict[str, Any]:
     if syntax not in ("theory", "python"):
         raise ValueError("Choose either the Python-style or formal (theory, experimental) regex syntax.")
 
-    try:
-        if syntax == "theory":
-            nfa = _build_theory_nfa(expression)
-        else:
-            nfa = glushkov_regex.build_glushkov_nfa(expression)
-    except glushkov_regex.RegexSyntaxError as exc:
-        raise ValueError(f"Could not parse that Python-style regex: {exc}") from exc
-    except ValueError:
-        raise
-    except Exception as exc:  # pragma: no cover - defensive
-        raise ValueError(f"Could not parse or convert that regex: {str(exc)[:400]}") from exc
+    python_nfa = None
+    if syntax == "theory":
+        nfa = _build_theory_nfa(expression)
+    else:
+        python_nfa = _build_python_nfa(expression)
+        nfa = _pyformlang_to_dict(python_nfa)
 
     if mode == "dfa":
-        automaton = _determinize_theory(nfa) if syntax == "theory" else determinize(nfa)
+        automaton = _determinize_theory(nfa) if syntax == "theory" else _pyformlang_to_dict(python_nfa.to_deterministic())
         automaton = _complete_dfa(automaton)
     else:
         automaton = nfa

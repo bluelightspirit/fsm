@@ -4,7 +4,7 @@ A browser tool for sketching finite state machines and getting them into papers 
 
 Live original: <http://madebyevan.com/fsm/>
 
-The editor is vanilla JavaScript plus a small Python server. **The base install needs no packages** — only Python 3 and a browser. 
+The editor is vanilla JavaScript plus a small Python server. Regex conversion uses Pyformlang; install the requirements before starting the server.
 
 The purpose of making this is because in a generic Brave search, I didn't find any easy-to-use and obviously set margin and paper size based DFA/NFA generator out there for some reason. Most of them are of an unlimited scale, which is not how papers are sized.
 
@@ -39,6 +39,7 @@ The project does have a right-linear grammar (a regular subset of CFGs) generato
 ```bash
 git clone --branch my-main https://github.com/bluelightspirit/fsm.git
 cd fsm
+python3 -m pip install -r requirements.txt
 python3 server.py            # then open http://localhost:8000
 ```
 
@@ -66,7 +67,7 @@ Developed and tested on Python 3.11. Regex conversion and the Lean buttons talk 
 - Validation for DFA / NFA: determinism, completeness, reachability, dead states, missing transitions, ε‑transitions.
 - NFA → DFA subset construction (creates a separate DFA in the workspace).
 - **Regex → automaton** — see below.
-- Right‑linear grammar display.
+- Right‑linear grammar display and conversion back to an equivalent regular expression in Python-style or formal-theory notation.
 - **Check with Lean** and **Verify with Lean** — see below.
 
 ---
@@ -100,16 +101,20 @@ Type a regular expression in the right panel, pick **ε‑NFA** or **DFA**, pick
 
 | | Python‑style (default) | Formal / theory (**experimental**) |
 |---|---|---|
-| Symbols | each character; `\d \w \s`, `.` and `[a-z]` are single symbols | **every character is its own symbol** — `abb` is a, b, b |
+| Symbols | Python-style character symbols; `\d`, `\w`, `\s`, `.`, character classes, and bounded repetitions are supported | **every character is its own symbol** — `abb` is a, b, b |
 | Union | `\|` | `+` or `\|` |
 | Repetition | `*  +  ?` | `*` only |
-| Empty string | — | `epsilon` or `$` |
+| Empty string | `()` | `ε`, `epsilon`, or `$` |
 | Concatenation | adjacency | adjacency, `.` or a space |
-| Method | Glushkov position automaton (no ε‑edges) | Thompson ε‑NFA, then subset construction |
+| Method | Pyformlang `PythonRegex` to ε‑NFA; Pyformlang subset construction for DFA output | Project's Thompson ε‑NFA, then subset construction |
 
-Examples: `(a|b)*abb` (Python‑style) and `(a+b)*abb` (formal) both give the language of strings over {a, b} ending in `abb`. Not supported in either: anchors, `{m,n}`, backreferences, lookaround. Limits: 512 characters, 512 states, 2,048 transitions.
+Examples: `(a|b)*abb` (Python‑style) and `(a+b)*abb` (formal) both give the language of strings over {a, b} ending in `abb`. The Python-style converter uses Pyformlang's `PythonRegex` implementation, including bounded repetitions. Anchors, backreferences, and lookaround are not supported. Limits: 512 characters, 512 states, 2,048 transitions.
 
 If the converter here ever misbehaves, [CyberZHG's nfa2dfa](https://cyberzhg.github.io/toolbox/nfa2dfa) is a good alternative to compare against.
+
+## Automaton / Type 3 grammar → regex
+
+In the automaton properties panel, **Show regular CFG** displays the equivalent right-linear Type 3 grammar. **Show Python-style regex** and **Show formal-theory regex** convert that same grammar to a regular expression using Kleene's state-elimination construction. Python-style notation uses `|` for union; formal-theory notation uses `+` and `ε`. Each input symbol must be one character; the conversion supports at most 48 states to keep expressions manageable.
 
 ---
 
@@ -168,15 +173,13 @@ Compiling exports needs `pdflatex` (LaTeX) or `typst`; neither is needed to use 
 fsm/
 ├── server.py                 # serves www/ and the API (regex conversion, Lean checks)
 ├── build.py                  # concatenates src/**/*.js into www/fsm.js (no deps)
-├── automata_integration.py   # regex -> automaton (both syntaxes), DFA completion
-├── glushkov_regex.py         # Python-style regex parser
-├── glushkov_core.py          # Glushkov construction + subset construction
+├── automata_integration.py   # regex -> automaton (Pyformlang + formal syntax), DFA completion
 ├── classic_regex.py          # formal regex parser (every character a symbol)
 ├── thompson_port.py          # Thompson epsilon-NFA, mirrors the Lean implementation
 ├── lean_integration.py       # "Check with Lean": invariants of the drawn model
 ├── lean_regex_check.py       # "Verify with Lean": Python vs Lean regex construction
 ├── measure_margins.py        # margin measurement for exported PDFs
-├── requirements.txt          # base install: nothing to install
+├── requirements.txt          # Pyformlang for Python-style regex conversion
 ├── requirements-lean.txt     # optional: PyPantograph
 ├── NOTICE.md                 # third-party licenses and attributions
 ├── tests/                    # unittest suite
@@ -214,6 +217,6 @@ MIT. Original copyright © 2010 Evan Wallace. See the header in `src/_license.js
 - Multi‑FSM workspaces, undo/redo, theming, refreshed UI: [Moeein Aali](https://github.com/MoeeinAali)
 - The automaton property checklist and conversion workflow were informed by [Automata Studio](https://github.com/ReyEscarlata0/automata-studio) (MIT‑licensed); this project uses its own implementation.
 - Lean checking uses [PyPantograph](https://github.com/stanford-centaur/PyPantograph) from Stanford Centaur (Apache‑2.0).
-- The [Pyformlang](https://github.com/Aunsiels/pyformlang) documentation was a reference for textbook regex syntax; no Pyformlang code is used.
+- Python-style regex conversion uses [Pyformlang](https://github.com/Aunsiels/pyformlang)'s `PythonRegex` parser and automaton constructors (MIT).
 - [CyberZHG's toolbox](https://cyberzhg.github.io/toolbox/) was used only as an external reference for expected automata; no code from it is used.
-- Constructions: Glushkov (1961) / Berry–Sethi (1986) for Python‑style regex, Thompson (1968) for the formal syntax.
+- Constructions: Pyformlang `PythonRegex` for Python-style regex, Thompson (1968) for the formal syntax.
