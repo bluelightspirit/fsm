@@ -30,7 +30,7 @@ Turing machines and PDAs are similarly designed with states and transitions like
 
 ## Another random note
 
-The project does have a right-linear grammar (a regular subset of CFGs) generator from the current FSM available.
+The project does have a right-linear grammar (a regular subset of CFGs) generator from the current FSM available. Regex, the Pythonic way and computer theory way, are also available to generate FSMs. However, the number of states available to be used by this project are limited - found in the known limitations section of this README.
 
 ---
 
