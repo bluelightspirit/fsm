@@ -22,6 +22,11 @@ LaTeX shortcuts at https://formalsketch.github.io/ probably would work for this 
 
 Finite state automaton via the CFG generated to regex converting is a WIP by Claude free messages delay. How fun it is to code without paying a penny to Claude... Moore and mealy machines also would make sense to make as part of type 3 designs. However, the first priority is converting CFG to regex. This is a a 2nd WIP. A 3rd WIP may be to try to attempt converting CFGs to regular languages, but that is easier said than done IMO because I'd have to do proofs in Lean 4 and/or Python to even be certain it is a type 3 language being converted instead of a type 2... The 4th WIP most likely will be unit tests / proofs by hand / seeing if Lean 4 and Python match human-made proofs. The 5th WIP (may change order later - this sounds vital tbh) would be to give examples and do proofs on trying to integrate FSMs for pages while also incorporating text right after the FSM ends instead of waiting for the page to end entirely. Oh for that one I'd want custom inch margin boundaries for the edges.
 
+Status:
+1st WIP is done - Codex did this fast. I also used Pyformlang for Python-style regex instead of using the brute force way Claude used that isn't library based...
+2nd WIP now 1st WIP. Well - moore and mealy machines are added. Trying to make proofs to convert between them and DFAs/NFAs require brain power in my head though versus NFA/DFA I was taught at UMW... >_>
+Now I will go after the 5th WIP.
+
 ## Note for licenses
 
 MIT. Original copyright © 2010 Evan Wallace. See the header in `src/_license.js`. Third-party components and references, including PyPantograph (Apache-2.0, optional, installed separately), are listed in [NOTICE.md](NOTICE.md). There is no LICENSE.md because there is more than 1 license used in this project.
