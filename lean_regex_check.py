@@ -378,10 +378,10 @@ def check_regex_construction_with_lean(payload: dict[str, Any]) -> dict[str, Any
 
     results: list[dict[str, Any]] = []
     try:
-        from pantograph import Server
+        from lean_integration import _start_pantograph
 
         with _lean_lock:
-            with Server(imports=["Init"], timeout=120) as server:
+            with _start_pantograph(["Init"]) as server:
                 for label, source in stages:
                     ok, detail = _run_lean(server, source)
                     results.append({"stage": label, "ok": ok, "detail": detail})

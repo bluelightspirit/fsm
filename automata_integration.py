@@ -10,9 +10,8 @@ Two regex dialects, chosen by "syntax" in the request payload:
       (`abb` is a, b, b); union is `+` or `|`, star is `*`, `ε`, `epsilon` or `$` is the empty string,
       grouping with parentheses. Parsed by classic_regex.py and compiled to an epsilon-NFA by
       thompson_port.py, a Python port of the Lean implementation in lean_regex_check.py, so the
-      "Verify with Lean" button can check that the two agree. DFA output uses subset
-      construction with epsilon-closure, written to be deterministic (sorted, FIFO) so the
-      Lean side can reproduce it exactly.
+      "Verify with Lean" button can check that the two agree. Deterministic outputs use one
+      explicit subset construction with epsilon-closure for both regex dialects.
 
 Both end in the same JSON shape: nodes, starts, accepts, edges, alphabet. DFA output is made
 total by routing missing transitions to a shared sink state (not covered by the Lean check).
@@ -32,8 +31,8 @@ MAX_TRANSITIONS = 2048
 
 def _complete_dfa(dfa: dict[str, Any]) -> dict[str, Any]:
     """Route every missing (state, symbol) pair to a shared non-accepting
-    sink state. Neither determinize() nor the Thompson construction
-    guarantee a total transition function, but the editor's DFA validator
+    sink state. Subset construction may produce a partial transition function,
+    but the editor's DFA validator
     (and the Lean invariant) require one."""
     alphabet = dfa["alphabet"]
     total = dfa["states"]
@@ -128,7 +127,7 @@ def _build_python_nfa(expression: str) -> Any:
         raise ValueError(f"Could not parse that Python-style regex: {str(exc)[:400]}") from exc
 
 
-def _determinize_theory(nfa: dict[str, Any]) -> dict[str, Any]:
+def _determinize_nfa(nfa: dict[str, Any]) -> dict[str, Any]:
     """Subset construction with epsilon-closure, made CANONICALLY
     deterministic: every step that produces an order (worklist processing,
     epsilon-closure expansion) is explicitly sorted, rather than relying on
@@ -157,7 +156,7 @@ def _determinize_theory(nfa: dict[str, Any]) -> dict[str, Any]:
             frontier = sorted(next_frontier)
         return tuple(sorted(closure))  # canonical sorted tuple, safe as a dict key
 
-    alphabet = [s for s in nfa["alphabet"]]  # already sorted by _build_theory_nfa
+    alphabet = sorted(nfa["alphabet"], key=str)
     accepts_set = set(nfa["accepts"])
     start_key = eps_closure(nfa["starts"])
     dfa_states = {start_key: 0}
@@ -201,8 +200,8 @@ def regex_to_automaton(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Enter a regular expression first.")
     if len(expression) > MAX_REGEX_LENGTH:
         raise ValueError(f"Regular expressions are limited to {MAX_REGEX_LENGTH} characters.")
-    if mode not in ("nfa", "dfa"):
-        raise ValueError("Choose either \u03b5-NFA or DFA output.")
+    if mode not in ("nfa", "dfa", "moore", "mealy"):
+        raise ValueError("Choose ε-NFA, DFA, Moore, or Mealy output.")
     if syntax not in ("theory", "python"):
         raise ValueError("Choose either the Python-style or formal (theory, experimental) regex syntax.")
 
@@ -213,8 +212,12 @@ def regex_to_automaton(payload: dict[str, Any]) -> dict[str, Any]:
         python_nfa = _build_python_nfa(expression)
         nfa = _pyformlang_to_dict(python_nfa)
 
-    if mode == "dfa":
-        automaton = _determinize_theory(nfa) if syntax == "theory" else _pyformlang_to_dict(python_nfa.to_deterministic())
+    deterministic_output = mode in ("dfa", "moore", "mealy")
+    if deterministic_output:
+        # Use the same explicit epsilon-closure subset construction for both
+        # regex dialects. This guarantees one transition per state/symbol,
+        # which is essential for valid DFA, Moore, and Mealy output.
+        automaton = _determinize_nfa(nfa)
         automaton = _complete_dfa(automaton)
     else:
         automaton = nfa
@@ -228,13 +231,30 @@ def regex_to_automaton(payload: dict[str, Any]) -> dict[str, Any]:
     accepts = sorted(automaton["accepts"])
     accepts_set = set(accepts)
     edges = sorted(automaton["edges"], key=lambda e: (e["from"], e["symbol"], e["to"]))
+    if deterministic_output:
+        seen_transitions = set()
+        for edge in edges:
+            key = (edge["from"], edge["symbol"])
+            if key in seen_transitions:
+                raise ValueError("Internal conversion error: determinization produced multiple destinations for one state/symbol pair.")
+            seen_transitions.add(key)
+    if mode == "moore":
+        nodes = [{"id": i, "name": f"q{i} / {'accept' if i in accepts_set else 'reject'}", "accepting": False} for i in range(total_states)]
+        accepts = []
+    elif mode == "mealy":
+        edges = [dict(edge, symbol=f"{edge['symbol']}/{'accept' if edge['to'] in accepts_set else 'reject'}") for edge in edges]
+        nodes = [{"id": i, "name": f"q{i}", "accepting": False} for i in range(total_states)]
+        accepts = []
+    else:
+        nodes = [{"id": i, "name": f"q{i}", "accepting": i in accepts_set} for i in range(total_states)]
     return {
         "type": mode,
         "syntax": syntax,
         "experimental": syntax == "theory",
-        "nodes": [{"id": i, "name": f"q{i}", "accepting": i in accepts_set} for i in range(total_states)],
+        "nodes": nodes,
         "starts": automaton["starts"],
         "accepts": accepts,
         "edges": edges,
         "alphabet": automaton["alphabet"],
+        "emptyWordAccepted": automaton["starts"][0] in accepts_set,
     }

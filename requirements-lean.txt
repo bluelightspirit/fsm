@@ -1,4 +1,6 @@
-# Optional: PyPantograph, used by the "Check with Lean" and "Verify with Lean" buttons.
-# Needs git (pip clones the repository) and Lean 4 installed through elan: https://github.com/leanprover/elan
-# PyPantograph is licensed Apache-2.0: https://github.com/stanford-centaur/PyPantograph
+# Optional Python dependency for the "Check with Lean" and "Verify with Lean" buttons.
+# Same package on all OSes; requires Python >=3.11 and Git to install from its tag.
+# Install Lean 4 separately with elan (https://github.com/leanprover/elan).
+# On Windows, the app adds the .exe suffix PyPantograph's bundled REPL needs at launch.
+# PyPantograph is Apache-2.0: https://github.com/stanford-centaur/PyPantograph
 git+https://github.com/stanford-centaur/PyPantograph.git@v0.3.15

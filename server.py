@@ -109,6 +109,7 @@ def main():
 
     handler = functools.partial(Handler, directory=WWW)
     server = http.server.ThreadingHTTPServer((args.host, args.port), handler)
+    print(f"[lean] Windows-compatible launcher loaded from {os.path.join(ROOT, 'lean_integration.py')}", flush=True)
     print("Serving http://localhost:%d  (Ctrl+C to stop; auto-rebuilds on changes)" % args.port, flush=True)
     try:
         server.serve_forever()

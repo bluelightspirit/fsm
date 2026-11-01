@@ -1,2 +1,2 @@
-# Pyformlang is used by the Python-style regex to automaton converter.
+# Core runtime dependency. This file is the same on Windows, WSL, macOS, and Linux.
 pyformlang==1.0.11

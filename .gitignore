@@ -1,6 +1,7 @@
 .venv
 .venv311
 .venv-py311
+.cache/
 .git
 # Python generated files
 __pycache__/

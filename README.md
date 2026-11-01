@@ -1,4 +1,4 @@
-# Finite State Machine (Type 3) Designer
+# Finite State Machine Designer
 
 A browser tool for sketching finite state machines and getting them into papers (A4 and US Letter) by following their respective margins and paper sizes in inches. Originally created by [Evan Wallace](http://madebyevan.com/fsm/) in 2010; this fork adds multi‑FSM workspaces, undo/redo and theming ([Moeein Aali](https://github.com/MoeeinAali)), plus paged exports to LaTeX/Typst, regex → automaton conversion, and optional Lean 4 checking.
 
@@ -6,31 +6,7 @@ Live original: <http://madebyevan.com/fsm/>
 
 The editor is vanilla JavaScript plus a small Python server. Regex conversion uses Pyformlang; install the requirements before starting the server.
 
-The purpose of making this is because in a generic Brave search, I didn't find any easy-to-use and obviously set margin and paper size based DFA/NFA generator out there for some reason. Most of them are of an unlimited scale or limited to 1 set canvas scale, which is not how papers are sized (as they can be multiple pages). https://abpaudel.com/fsm-designer/ is close since it covers width and height in pixels as boundaries for the FSM but does not support multiple pages or seem to be an easy copy and paste solution straight into LaTeX while respecting margins correctly... And I don't bother with exporting with JSON like https://github.com/yalue/fsm_designer does and just use internal comments in Typst or LaTeX instead since there is probably a sizable amount of people who would rather avoid JSON at all costs. I also don't bother with chip firing game weight stuff like https://markusfeng.com/projects/graph/ does as I don't have all the time in world...
-
-The live editing way for diagrams may exist at https://www.reddit.com/r/programming/comments/a39sq3/comment/eb5el3w/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button among others - but these are of an unlimited scale again. I don't see obviously set paper margins or page separations available. https://web.cs.ucdavis.edu/~doty/automata/ is another live editing one.
-
-Serializing global variables per https://www.reddit.com/r/programming/comments/a39sq3/comment/emr02o9/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button probably is a good idea also for compilers. I don't have all the time in the world for adding these either...
-
-https://jimmyhmiller.com/fsm-maker/ is probably one of the most straightforward design options for text to FSM. I don't have all the time in the world to revamp the States & arrows section to be like that...
-
-MATLAB at https://www.mathworks.com/help/hdlcoder/ug/model-a-state-machine-for-hdl-code-generation.html or Verilog at https://www.reddit.com/r/Verilog/comments/17c3bld/implementing_a_mealy_state_machine/ also can generate FSMs - but bothering trying to convert all MATLAB/Verilog code to FSMs here is not a realistic goal because of the known limitations of states portion and because I don't have all the time in the world. The same is true for JAX at https://google-research.github.io/self-organising-systems/2022/diff-fsm/ or PLCs at https://industrialmonitordirect.com/blogs/knowledgebase/state-machine-design-in-plc-programming-mealy-moore-and-implementation-approaches >_>
-
-I also have no idea why https://vlsiverify.com/verilog/fsm-and-sequence-detector/ says only mealy machine and moore machines are ways to design FSMs... I guess Verilog is something else.
-
-LaTeX shortcuts at https://formalsketch.github.io/ probably would work for this project, but I don't know where the code by Iman Mohammadi is at.
-
-Finite state automaton via the CFG generated to regex converting is a WIP by Claude free messages delay. How fun it is to code without paying a penny to Claude... Moore and mealy machines also would make sense to make as part of type 3 designs. However, the first priority is converting CFG to regex. This is a a 2nd WIP. A 3rd WIP may be to try to attempt converting CFGs to regular languages, but that is easier said than done IMO because I'd have to do proofs in Lean 4 and/or Python to even be certain it is a type 3 language being converted instead of a type 2... The 4th WIP most likely will be unit tests / proofs by hand / seeing if Lean 4 and Python match human-made proofs. The 5th WIP (may change order later - this sounds vital tbh) would be to give examples and do proofs on trying to integrate FSMs for pages while also incorporating text right after the FSM ends instead of waiting for the page to end entirely. Oh for that one I'd want custom inch margin boundaries for the edges.
-
-Status:
-1st WIP is done - Codex did this fast. I also used Pyformlang for Python-style regex instead of using the brute force way Claude used that isn't library based...
-2nd WIP now 1st WIP. Well - moore and mealy machines are added. Trying to make proofs to convert between them and DFAs/NFAs require brain power in my head though versus NFA/DFA I was taught at UMW... >_>
-Now I will go after the 5th WIP.
-
-## Note for licenses
-
-MIT. Original copyright © 2010 Evan Wallace. See the header in `src/_license.js`. Third-party components and references, including PyPantograph (Apache-2.0, optional, installed separately), are listed in [NOTICE.md](NOTICE.md). There is no LICENSE.md because there is more than 1 license used in this project.
-
+The purpose of making this is because in a generic Brave search, I didn't find any easy-to-use and obviously set margin and paper size based DFA/NFA generator out there for some reason. Most of them are of an unlimited scale, which is not how papers are sized.
 
 ## Note for AI usage
 
@@ -40,7 +16,7 @@ I do declare this as vibecoded instead of just "Permissive AI Policy" per https:
 
 ## Note for design issues and missing features
 
-Also, it should be noted that IEEE Conference is 2 column limited. Respecting the 2 column rule while maintaining all margins for US Letter and A4 for DFAs and NFAs probably would take another entire month or so of prompting as Claude takes eternity to develop things for free. Generic ChatGPT or the likes with less limitations would probably not get me anywhere.
+Also, it should be noted that IEEE Conference is 2 column limited. Respecting the 2 column rule while maintaining all margins for US Letter and A4 for DFAs and NFAs probably would take another entire month or so of prompting as Claude takes eternity to develop things for free. Generic ChatGPT or the likes with less limitations would probably not get me anywhere. 
 
 Typst labels for DFAs/NFAs as an alternative option to LaTeX also would probably take another week of prompting and waiting by Claude. 
 
@@ -67,6 +43,8 @@ python3 -m pip install -r requirements.txt
 python3 server.py            # then open http://localhost:8000
 ```
 
+In Windows PowerShell, use the Python launcher if it detects your Python version (`py -3.11 -m pip install -r requirements.txt`, then `py -3.11 server.py`). If it says no suitable runtime, use the full path to `python.exe`, for example `$py311 = "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe"`, then `& $py311 -m pip install -r requirements.txt` and `& $py311 server.py`.
+
 `python3 server.py 8001` picks another port; `--host 0.0.0.0` makes it reachable from other devices. The server rebuilds `www/fsm.js` automatically whenever something under `src/` changes.
 
 Developed and tested on Python 3.11. Regex conversion and the Lean buttons talk to `server.py`, so they do not work if you only serve `www/` with `python3 -m http.server`.
@@ -88,10 +66,10 @@ Developed and tested on Python 3.11. Regex conversion and the Lean buttons talk 
 - A `.typ` or `.tex` file the tool exported can be **imported back** (the diagram is stored in a comment).
 
 **Automaton properties panel** (right side)
-- Validation for DFA / NFA: determinism, completeness, reachability, dead states, missing transitions, ε‑transitions.
-- NFA → DFA subset construction (creates a separate DFA in the workspace).
+- DFA, NFA, Moore machine, and Mealy machine modes, with determinism, completeness, reachability, dead-state, and output-label validation.
+- Conversions between DFA, NFA, Moore, and Mealy machines. NFA → DFA uses subset construction; Mealy → Moore splits states by incoming output. DFA/NFA → Moore/Mealy maps acceptor states to `accept` and `reject` outputs. Moore/Mealy → NFA is built through a right-linear Type 3 grammar: `ε` productions mark accepting states. DFA conversion determinizes that NFA. For a deterministic source, the NFA may be identical to the DFA. Moore states outputting `accept` are accepting. Mealy keeps the input alphabet and accepts a word when its final transition outputs `accept`; the empty word is rejected because Mealy emits no output before input.
 - **Regex → automaton** — see below.
-- Right‑linear grammar display and conversion back to an equivalent regular expression in Python-style or formal-theory notation.
+- Right‑linear grammar display and conversion back to an equivalent regular expression in Python-style or formal-theory notation. For Mealy machines, regex conversion uses the final-transition `accept` output as acceptance.
 - **Check with Lean** and **Verify with Lean** — see below.
 
 ---
@@ -121,7 +99,7 @@ Developed and tested on Python 3.11. Regex conversion and the Lean buttons talk 
 
 ## Regex → automaton
 
-Type a regular expression in the right panel, pick **ε‑NFA** or **DFA**, pick a syntax, and generate. The result opens as a new diagram you can arrange yourself.
+Type a regular expression in the right panel, choose **ε‑NFA**, **DFA**, **Moore**, or **Mealy**, pick a syntax, and generate. The result opens as a new diagram you can arrange yourself.
 
 | | Python‑style (default) | Formal / theory (**experimental**) |
 |---|---|---|
@@ -130,32 +108,40 @@ Type a regular expression in the right panel, pick **ε‑NFA** or **DFA**, pick
 | Repetition | `*  +  ?` | `*` only |
 | Empty string | `()` | `ε`, `epsilon`, or `$` |
 | Concatenation | adjacency | adjacency, `.` or a space |
-| Method | Pyformlang `PythonRegex` to ε‑NFA; Pyformlang subset construction for DFA output | Project's Thompson ε‑NFA, then subset construction |
+| Method | Pyformlang `PythonRegex` to ε‑NFA; project subset construction for DFA/Moore/Mealy output | Project's Thompson ε‑NFA, then the same subset construction |
 
-Examples: `(a|b)*abb` (Python‑style) and `(a+b)*abb` (formal) both give the language of strings over {a, b} ending in `abb`. The Python-style converter uses Pyformlang's `PythonRegex` implementation, including bounded repetitions. Anchors, backreferences, and lookaround are not supported. Limits: 512 characters, 512 states, 2,048 transitions.
+Examples: `(a|b)*abb` (Python‑style) and `(a+b)*abb` (formal) both give the language of strings over {a, b} ending in `abb`. The Python‑style converter uses Pyformlang's `PythonRegex` implementation, including bounded repetitions. Expressions describe whole strings, so anchors, backreferences, and lookaround are not supported; `^` is a literal symbol. For strings beginning with `dog` and followed only by lowercase letters, use `dog[a-z]*` (Python-style) or `dog(a+b+c+d+e+f+g+h+i+j+k+l+m+n+o+p+q+r+s+t+u+v+w+x+y+z)*` (formal theory). `Σ` is mathematical shorthand and must be expanded; `.` expands to all printable characters and may exceed the 2,048-transition limit. Limits: 512 characters, 512 states, 2,048 transitions.
 
 If the converter here ever misbehaves, [CyberZHG's nfa2dfa](https://cyberzhg.github.io/toolbox/nfa2dfa) is a good alternative to compare against.
 
 ## Automaton / Type 3 grammar → regex
 
-In the automaton properties panel, **Show regular CFG** displays the equivalent right-linear Type 3 grammar. **Show Python-style regex** and **Show formal-theory regex** convert that same grammar to a regular expression using Kleene's state-elimination construction. Python-style notation uses `|` for union; formal-theory notation uses `+` and `ε`. Each input symbol must be one character; the conversion supports at most 48 states to keep expressions manageable.
+In the automaton properties panel, **Show regular CFG** displays the equivalent right-linear Type 3 grammar. **Show Python-style regex** and **Show formal-theory regex** convert the accepted input language to a regular expression using Kleene's state-elimination construction. For Mealy machines, the final transition output `accept` determines acceptance. Python-style notation uses `|` for union; formal-theory notation uses `+` and `ε`. Each input symbol must be one character; the conversion supports at most 48 states to keep expressions manageable.
+
+## Moore and Mealy machines
+
+Choose **Moore machine** in the machine-type menu and include each state's output in its label as `state/output` (for example, `q0/accept`). For a **Mealy machine**, label each arrow `input/output` (for example, `a/accept`); comma-separated alternatives can be written `a/accept,b/reject`. Moore → DFA/NFA treats Moore states outputting `accept` as accepting states. Mealy → DFA/NFA keeps the input alphabet and accepts when the final transition outputs `accept`; the empty word is rejected. The Mealy trace grammar remains available through **Show regular CFG**, where each input/output pair is a terminal. DFA/NFA to Moore/Mealy assigns `accept` or `reject` according to the acceptor state after each input. Mealy → Moore uses `∅` for the start state's no-output marker. Lean checks the resulting DFA structure, but does not prove conversion semantics.
 
 ---
 
 ## Lean checking (optional)
 
-The app works without Lean. To enable the two buttons, install Lean 4 through [`elan`](https://github.com/leanprover/elan) and PyPantograph into the Python environment that runs `server.py` (needs `git`):
+The app works without Lean. To enable the two buttons, use Python 3.11 or newer and install PyPantograph into the same Python environment that runs `server.py` (Git is needed because pip installs a tagged Git source). PyPantograph v0.3.15 requires Python `>=3.11.0`. The Python dependencies are the same on Windows, WSL, macOS, and Linux; `requirements-lean.txt` installs the Python bridge only. Install Lean 4 separately through [`elan`](https://github.com/leanprover/elan), then ensure its `lean` and `lake` commands are available in the same shell that starts the server.
 
 ```bash
+python3 -m pip install -r requirements.txt
 python3 -m pip install -r requirements-lean.txt
+python3 server.py
 ```
 
-Restart `server.py` afterwards. On Windows, WSL is recommended for the Lean toolchain. See the [PyPantograph install notes](https://github.com/stanford-centaur/PyPantograph#installation) for platform details.
+In PowerShell, replace `python3` with `py -3.11` if the launcher detects Python; otherwise use the full `python.exe` path as in Quick start. Install elan/Lean in the environment where the server will run. WSL is the recommended Windows route for Lean; if running natively on Windows, the app handles the `.exe` suffix needed by PyPantograph's bundled REPL. After pip finishes, confirm the optional bridge is installed with `python -m pip show pantograph` (or the same interpreter path used above); the install is complete only if pip reports `Successfully installed pantograph-0.3.15` or `pip show` displays version `0.3.15`. Restart `server.py` after installation. See the [PyPantograph install notes](https://github.com/stanford-centaur/PyPantograph#installation) for platform details.
 
 - **Check with Lean** sends the drawn diagram to Lean, which checks that the start and accept states exist and every transition connects existing states — and, for a DFA, that it is deterministic and complete.
 - **Verify with Lean** (formal syntax only) checks that the ε‑NFA the tool built, and the DFA built from it, are *exactly* what an independent implementation written in Lean produces for that regex.
 
-**What "Verify" does and does not show.** It confirms two implementations agree on that regex, which catches bugs in either one. It is **not** a proof that the construction always preserves the regex's language, and it does not cover the sink state added to complete a DFA. A wrong claim is reported as a failure (the test‑suite checks this), and a pass means Lean accepted it.
+**What "Verify" does and does not show.** It confirms two implementations agree on that regex, which catches bugs in either one. It is **not** a proof that the construction always preserves the regex's language, and it does not cover the sink state added to complete a DFA. This regex-construction verification supports only ε-NFA and DFA output. A wrong claim is reported as a failure (the test‑suite checks this), and a pass means Lean accepted it.
+
+For Moore and Mealy regex outputs, states/transitions are labeled `accept` or `reject` based on the DFA state after each input. Mealy conversion back to an acceptor uses the output on the final transition; the empty word is rejected because Mealy emits no output before input.
 
 ---
 
@@ -226,6 +212,12 @@ fsm_workspace = { version: 2, activeId, fsms: [{ id, name, createdAt, updatedAt 
 fsm_data_<id> = { nodes: [...], links: [...] }
 fsm_theme     = "system" | "light" | "dark"
 ```
+
+---
+
+## License
+
+MIT. Original copyright © 2010 Evan Wallace. See the header in `src/_license.js`. Third-party components and references, including PyPantograph (Apache-2.0, optional, installed separately), are listed in [NOTICE.md](NOTICE.md).
 
 ---
 
