@@ -26,7 +26,7 @@ A JavaScript or TypeScript library probably would've been more wise to use over 
 
 ## Note for future projects
 
-Turing machines and PDAs are similarly designed with states and transitions like DFA/NFAs. However, for that to work out, an entire new project would have to be started with different Lean 4 proofs, Python proofs, and design between transitions as far as I'm aware - or just a new tab at the top of this project. This is because PDAs/general CFGs (for Type 2, not Type 3 per https://devopedia.org/chomsky-hierarchy) represent context-free languages, while turing machines represent recursively enumerable languages (Type 0) or context-sensitive languages (Type 1). 
+Turing machines, LBAs, and PDAs are similarly designed with states and transitions like DFA/NFAs. However, for that to work out, an entire new project would have to be started with different Lean 4 proofs, Python proofs, and design between transitions as far as I'm aware - or just a new tab at the top of this project. This is because PDAs/general CFGs (for Type 2, not Type 3 per https://devopedia.org/chomsky-hierarchy) represent context-free languages, while turing machines represent recursively enumerable languages (Type 0) and LBAs (restricted turing machines) represent context-sensitive languages (Type 1). 
 
 ## Another random note
 
