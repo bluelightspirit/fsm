@@ -24,7 +24,8 @@ Finite state automaton via the CFG generated to regex converting is a WIP by Cla
 
 Status:
 1st WIP is done - Codex did this fast. I also used Pyformlang for Python-style regex instead of using the brute force way Claude used that isn't library based...
-2nd WIP now 1st WIP.
+2nd WIP now 1st WIP. Well - moore and mealy machines are added. Trying to make proofs to convert between them and DFAs/NFAs require brain power in my head though versus NFA/DFA I was taught at UMW... >_>
+Now I will go after the 5th WIP.
 
 ## Note for licenses
 
