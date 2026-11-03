@@ -25,7 +25,7 @@ Finite state automaton via the CFG generated to regex converting is a WIP by Cla
 Status:
 1st WIP is done - Codex did this fast. I also used Pyformlang for Python-style regex instead of using the brute force way Claude used that isn't library based...
 2nd WIP now 1st WIP. Well - moore and mealy machines are added. Trying to make proofs to convert between them and DFAs/NFAs require brain power in my head though versus NFA/DFA I was taught at UMW... >_>
-Now I will go after the 5th WIP.
+Now I will go after the 5th WIP. I will say FSTs are in Pyformlang's docs at https://pyformlang.readthedocs.io/en/latest/usage.html#finite-state-transducer and I doubt Claude and Codex even used that for the FSTs >_>
 
 Update:
 Going after the 5th WIP to try to have text merge with the FSM on the top and bottom is not as simple as it seems to do... It used up way too many Codex tokens so now I am stuck on the waiting for Claude loop! Currently, the export does not separate the FSM into separate pages. The main way to make this work I'd assume is to integrate text into the canvas itself... perhaps the 3rd/4th WIPS would have been more achievable... oh well. Not gonna back out. Time to wait probably a whole nother month.
