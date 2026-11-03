@@ -1,4 +1,4 @@
-# Finite State Machine (Type 3) Designer
+# Finite State Machine and Finite State Transducer (Type 3) Designer
 
 A browser tool for sketching finite state machines and getting them into papers (A4 and US Letter) by following their respective margins and paper sizes in inches. Originally created by [Evan Wallace](http://madebyevan.com/fsm/) in 2010; this fork adds multi‑FSM workspaces, undo/redo and theming ([Moeein Aali](https://github.com/MoeeinAali)), plus paged exports to LaTeX/Typst, regex → automaton conversion, and optional Lean 4 checking.
 
