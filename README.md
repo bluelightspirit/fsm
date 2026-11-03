@@ -42,6 +42,14 @@ update 3: NVM realistically, that would prbobably take up WAY WAY too many lines
 
 MIT. Original copyright © 2010 Evan Wallace. See the header in `src/_license.js`. Third-party components and references, including PyPantograph (Apache-2.0, optional, installed separately), are listed in [NOTICE.md](NOTICE.md). There is no LICENSE.md because there is more than 1 license used in this project.
 
+## Note for more export options
+
+A .dot file from a NetworkX graph at https://pyformlang.readthedocs.io/en/latest/usage.html#finite-state-transducer and https://networkx.org/documentation/networkx-2.5/auto_examples/pygraphviz/plot_write_dotfile.html may exist. I do not have all the time in the world, so feel free to make a PR for this.
+
+Similarly, WebP is another export option commonly used in the web - I don't have all the time in the world so feel free to make a PR.
+
+PDF is another export option commonly used in the web - for this one, I'd want a ton of options before exporting as PDF - do I want multiple pages, just the first page, just a specific page, do I want to export a Typst-based PDF or a LaTeX-based PDF, do I want to use some native Python or JavaScript PDF generating library, do I want to have SVGs or PNGs be merged into every PDF page instead, and stuff like that. I don't have all the time in the world to make this, so feel free to make a PR. 
+
 ## Note for mealy and moore machines
 
 These are deterministic FSTs per page 75 at https://www.cs.utexas.edu/~ear/cs341/automatabook/AutomataTheoryBook.pdf (go to page 89 in PDF viewer). Efforts were made to convert between determinstic FSTs (mealy machine/moore machine) and FSMs (DFA/NFA), however, they simply are different as they are 2-tape based, so the converting probably will break in many cases... if you can find out how to fix it, feel free to make a PR! 
