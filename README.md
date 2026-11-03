@@ -6,9 +6,11 @@ Live original: <http://madebyevan.com/fsm/>
 
 The editor is vanilla JavaScript plus a small Python server. Regex conversion uses Pyformlang; install the requirements before starting the server.
 
-The purpose of making this is because in a generic Brave search, I didn't find any easy-to-use and obviously set margin and paper size based DFA/NFA generator out there for some reason. Most of them are of an unlimited scale or limited to 1 set canvas scale, which is not how papers are sized (as they can be multiple pages). https://abpaudel.com/fsm-designer/ is close since it covers width and height in pixels as boundaries for the FSM but does not support multiple pages or seem to be an easy copy and paste solution straight into LaTeX while respecting margins correctly... And I don't bother with exporting with JSON like https://github.com/yalue/fsm_designer does and just use internal comments in Typst or LaTeX instead since there is probably a sizable amount of people who would rather avoid JSON at all costs. 
+The purpose of making this is because in a generic Brave search, I didn't find any easy-to-use and obviously set margin and paper size based DFA/NFA generator out there for some reason. Most of them are of an unlimited scale or limited to 1 set canvas scale, which is not how papers are sized (as they can be multiple pages). 
 
 ## Random alternatives researched for FSM designers
+
+https://abpaudel.com/fsm-designer/ is close since it covers width and height in pixels as boundaries for the FSM but does not support multiple pages or seem to be an easy copy and paste solution straight into LaTeX while respecting margins correctly... And I don't bother with exporting with JSON like https://github.com/yalue/fsm_designer does and just use internal comments in Typst or LaTeX instead since there is probably a sizable amount of people who would rather avoid JSON at all costs. 
 
 I also don't bother with chip firing game weight stuff like https://markusfeng.com/projects/graph/ does as I don't have all the time in world...
 
