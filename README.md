@@ -38,6 +38,9 @@ update 3: NVM realistically, that would prbobably take up WAY WAY too many lines
 
 MIT. Original copyright © 2010 Evan Wallace. See the header in `src/_license.js`. Third-party components and references, including PyPantograph (Apache-2.0, optional, installed separately), are listed in [NOTICE.md](NOTICE.md). There is no LICENSE.md because there is more than 1 license used in this project.
 
+## Note for mealy and moore machines
+
+These are FSTs per page 75 at https://www.cs.utexas.edu/~ear/cs341/automatabook/AutomataTheoryBook.pdf (go to page 89 in PDF viewer). Efforts were made to convert between FSTs (mealy machine/moore machine) and FSMs (DFA/NFA), however, they simply are different as they are 2-tape based, so the converting probably will break in many cases... if you can find out how to fix it, feel free to make a PR!
 
 ## Note for AI usage
 
