@@ -46,7 +46,11 @@ These are deterministic FSTs per page 75 at https://www.cs.utexas.edu/~ear/cs341
 
 https://cseweb.ucsd.edu/classes/sp13/cse105-b/LecFST.pdf says NFSTs exist! You don't have an option to make one or convert to one! They are type 3 because they're FSTs!
 
-I don't have all the time in the world. Feel free to make a PR if you want.
+I don't have all the time in the world. Feel free to make a PR if you want. Page 77 talks about a nondeterminstic Mealy machine at https://www.cs.utexas.edu/~ear/cs341/automatabook/AutomataTheoryBook.pdf (go to page 91 in PDF viewer). There's probably a nondeterminstic Moore machine too. There's Markov model as a NDFSM at page 79 (page 93 in PDF viewer) there too, and HMM at page 83 (page 97 in PDF viewer) as another NFST.
+
+## What about Büchi Automata?
+
+Infinite automaton is welcome as another PR too. Info can be read at page 88 (page 102) of https://www.cs.utexas.edu/~ear/cs341/automatabook/AutomataTheoryBook.pdf
 
 ## Note for AI usage
 
