@@ -50,7 +50,7 @@ I don't have all the time in the world. Feel free to make a PR if you want. Page
 
 ## What about Büchi Automata?
 
-Infinite automaton is welcome as another PR too. Info can be read at page 88 (page 102) of https://www.cs.utexas.edu/~ear/cs341/automatabook/AutomataTheoryBook.pdf
+Infinite automata is welcome as another PR too. Info can be read at page 88 (page 102) of https://www.cs.utexas.edu/~ear/cs341/automatabook/AutomataTheoryBook.pdf
 
 ## Note for AI usage
 
