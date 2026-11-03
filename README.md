@@ -1,4 +1,4 @@
-# Finite State Machine and Finite State Transducer (Type 3) Designer
+# Finite State Machine and Deterministic Finite State Transducer (Type 3) Designer
 
 A browser tool for sketching finite state machines and getting them into papers (A4 and US Letter) by following their respective margins and paper sizes in inches. Originally created by [Evan Wallace](http://madebyevan.com/fsm/) in 2010; this fork adds multi‑FSM workspaces, undo/redo and theming ([Moeein Aali](https://github.com/MoeeinAali)), plus paged exports to LaTeX/Typst, regex → automaton conversion, and optional Lean 4 checking.
 
@@ -40,7 +40,13 @@ MIT. Original copyright © 2010 Evan Wallace. See the header in `src/_license.js
 
 ## Note for mealy and moore machines
 
-These are FSTs per page 75 at https://www.cs.utexas.edu/~ear/cs341/automatabook/AutomataTheoryBook.pdf (go to page 89 in PDF viewer). Efforts were made to convert between FSTs (mealy machine/moore machine) and FSMs (DFA/NFA), however, they simply are different as they are 2-tape based, so the converting probably will break in many cases... if you can find out how to fix it, feel free to make a PR!
+These are deterministic FSTs per page 75 at https://www.cs.utexas.edu/~ear/cs341/automatabook/AutomataTheoryBook.pdf (go to page 89 in PDF viewer). Efforts were made to convert between determinstic FSTs (mealy machine/moore machine) and FSMs (DFA/NFA), however, they simply are different as they are 2-tape based, so the converting probably will break in many cases... if you can find out how to fix it, feel free to make a PR! 
+
+## Wheres NFSTs?
+
+https://cseweb.ucsd.edu/classes/sp13/cse105-b/LecFST.pdf says NFSTs exist! You don't have an option to make one or convert to one! They are type 3 because they're FSTs!
+
+I don't have all the time in the world. Feel free to make a PR if you want.
 
 ## Note for AI usage
 
