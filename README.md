@@ -59,6 +59,8 @@ PyPantograph is used over LeanDojo because of the paper at https://link.springer
 
 Rocq with CoqGym may eventually be second and third integrations. Same for Agda. https://www.reddit.com/r/math/comments/1pjt8np/lean_vs_rocq/ exists to discuss about that. Well, I don't have all the time in the world for that, and I will say in general, drawing finite automata to have too many states and transitions already doesn't look super readable to a viewer as there is simply not enough room in a paper to easily visualize maybe 1,000 transitions and 80 states or something, even if across multiple pages. I don't see the purpose of going with Aesop if "Pantograph’s approach to metavariable coupling is based on Aesop’s technique" per the Stanford paper. PyPantograph supports "Draft-Sketch-Prove algorithm" feature too per that paper.
 
+Ironically, LeanDojo v2 uses PyPantograph at https://github.com/lean-dojo/LeanDojo-v2/blob/main/README.md ... ummm lol. I don't know why I should exactly increase the chain as working with agents and trainers is well beyond the scope of designing automaton...
+
 ## Note for future projects
 
 Turing machines, LBAs, and PDAs are similarly designed with states and transitions like DFA/NFAs. However, for that to work out, an entire new project would have to be started with different Lean 4 proofs, Python proofs, and design between transitions as far as I'm aware - or just a new tab at the top of this project. This is because PDAs/general CFGs (for Type 2, not Type 3 per https://devopedia.org/chomsky-hierarchy) represent context-free languages, while turing machines represent recursively enumerable languages (Type 0) and LBAs (restricted turing machines) represent context-sensitive languages (Type 1). 
