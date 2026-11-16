@@ -21,8 +21,9 @@ function ExportAsLaTeX() {
   this.beginArrowClip = function (pages, margins, ppi, pageW, pageH) {
     this._texData += "\\begin{scope}\n\\clip ";
     for (var p = 0; p < pages; p++) {
+      var pm = typeof marginsAt === "function" ? marginsAt(margins, p) : (margins && margins.pages ? margins.pages[p] : margins);
       if (p) this._texData += " ";
-      this._texData += "(" + (margins.left * ppi * 0.1 + CLIP_INSET).toFixed(3) + "," + (-(p * pageH + margins.top * ppi) * 0.1 - CLIP_INSET).toFixed(3) + ") rectangle (" + ((paperPx(ppi).w - margins.right * ppi) * 0.1 - CLIP_INSET).toFixed(3) + "," + (-(p * pageH + paperPx(ppi).h - margins.bottom * ppi) * 0.1 + CLIP_INSET).toFixed(3) + ")";
+      this._texData += "(" + (pm.left * ppi * 0.1 + CLIP_INSET).toFixed(3) + "," + (-(p * pageH + pm.top * ppi) * 0.1 - CLIP_INSET).toFixed(3) + ") rectangle (" + ((paperPx(ppi).w - pm.right * ppi) * 0.1 - CLIP_INSET).toFixed(3) + "," + (-(p * pageH + paperPx(ppi).h - pm.bottom * ppi) * 0.1 + CLIP_INSET).toFixed(3) + ")";
     }
     this._texData += ";\n";
   };
@@ -161,10 +162,17 @@ function ExportAsLaTeX() {
       }
       paged += picture;
     }
-    if (!standalone) return data +
-      "% needs \\usepackage{tikz}; set the host document to the selected paper size.\n" +
-      "% If the host uses the standalone class, add the tikz option to its documentclass in the preamble.\n" +
-      "\\providecommand{\\FSMPageBreak}{\\newpage}\n" + paged;
+    if (!standalone) {
+      var headerComment =
+        "% Note on LaTeX page geometry vs. diagram clipping:\n" +
+        "% - The FSM diagram overlay clips its own states and arrows to each page's printable area using TikZ clipping.\n" +
+        "% - This snippet does NOT alter your host document's physical page geometry (\\geometry).\n" +
+        "% - To match host page text margins with each diagram page, use \\newgeometry{top=...in,bottom=...in,left=...in,right=...in} before each page.\n";
+      return data + headerComment +
+        "% needs \\usepackage{tikz}; set the host document to the selected paper size.\n" +
+        "% If the host uses the standalone class, add the tikz option to its documentclass in the preamble.\n" +
+        "\\providecommand{\\FSMPageBreak}{\\newpage}\n" + paged;
+    }
     return (
       data +
       "\\documentclass[tikz,border=0pt]{standalone}\n" +

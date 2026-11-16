@@ -157,10 +157,24 @@ function ExportAsTypst() {
     var pagedMode = pageMode !== false;
     var totalHeight = ph * pages;
     var paperName = pageSizeKey === "a4" ? "a4" : "us-letter";
+    var pm0 = typeof marginsAt === "function" ? marginsAt(margins, 0) : (margins && margins.pages ? margins.pages[0] : margins);
     var pageSetup = pagedMode
-      ? "#set page(paper: \"" + paperName + "\", margin: (top: " + margins.top + "in, bottom: " + margins.bottom + "in, left: " + margins.left + "in, right: " + margins.right + "in))\n"
+      ? "#set page(paper: \"" + paperName + "\", margin: (top: " + pm0.top + "in, bottom: " + pm0.bottom + "in, left: " + pm0.left + "in, right: " + pm0.right + "in))\n"
       : "#set page(width: " + pw.toFixed(4) + "in, height: " + totalHeight.toFixed(4) + "in, margin: 0pt)\n";
-    out += standalone ? pageSetup : "// Host document page setup: " + pageSetup.replace(/\n/g, " ") + "\n";
+    if (standalone) {
+      out += pageSetup;
+    } else {
+      out += "// Host document page setup: " + pageSetup.replace(/\n/g, " ") + "\n";
+      out += "// Note on Typst page geometry vs. diagram clipping:\n";
+      out += "// - In standalone export, #set page(margin: ...) enforces physical document geometry per page.\n";
+      out += "// - In this embedded snippet, inner clipping boxes constrain the diagram to printable areas but do not alter your host document's page geometry.\n";
+      if (margins && margins.pages && margins.pages.length > 1) {
+        for (var pi = 0; pi < pages; pi++) {
+          var pmi = typeof marginsAt === "function" ? marginsAt(margins, pi) : margins.pages[pi];
+          out += "// Page " + (pi + 1) + " margins: top " + pmi.top + "in, bottom " + pmi.bottom + "in, left " + pmi.left + "in, right " + pmi.right + "in\n";
+        }
+      }
+    }
     if (!pagedMode) {
       out += "#place(top + left)[\n  #box(width: " + pw.toFixed(4) + "in, height: " + totalHeight.toFixed(4) + "in, clip: true)[\n";
       out += "    #cetz.canvas({\n      import cetz.draw: *\n";
@@ -169,8 +183,14 @@ function ExportAsTypst() {
       return out + "    })\n  ]\n]\n";
     }
     for (var p = 0; p < pages; p++) {
-      if (p) out += "#pagebreak()\n";
-      out += "#place(top + left, dx: -" + margins.left + "in, dy: -" + margins.top + "in)[\n";
+      var pm = typeof marginsAt === "function" ? marginsAt(margins, p) : (margins && margins.pages ? margins.pages[p] : margins);
+      if (p) {
+        out += "#pagebreak()\n";
+        if (standalone && margins && margins.pages && margins.pages.length > 1) {
+          out += "#set page(margin: (top: " + pm.top + "in, bottom: " + pm.bottom + "in, left: " + pm.left + "in, right: " + pm.right + "in))\n";
+        }
+      }
+      out += "#place(top + left, dx: -" + pm.left + "in, dy: -" + pm.top + "in)[\n";
       out += "  #box(width: " + pw.toFixed(4) + "in, height: " + ph.toFixed(4) + "in, clip: true)[\n";
       function canvasCode(data) {
         return "#cetz.canvas({\n        import cetz.draw: *\n" +
@@ -179,12 +199,12 @@ function ExportAsTypst() {
       }
       var nodePageData = this._nodePages[p] || "";
       if (constrainMargins) {
-        var innerW = pw - margins.left - margins.right;
-        var innerH = ph - margins.top - margins.bottom;
-        out += "    #place(top + left, dx: " + margins.left + "in, dy: " + margins.top + "in)[\n";
+        var innerW = pw - pm.left - pm.right;
+        var innerH = ph - pm.top - pm.bottom;
+        out += "    #place(top + left, dx: " + pm.left + "in, dy: " + pm.top + "in)[\n";
         out += "      #box(width: " + innerW.toFixed(4) + "in, height: " + innerH.toFixed(4) + "in, clip: true)[\n";
-        if (nodePageData) out += "        #place(top + left, dx: -" + margins.left + "in, dy: -" + (p * ph + margins.top) + "in)[" + canvasCode(nodePageData) + "]\n";
-        if (this._arrowData) out += "        #place(top + left, dx: -" + margins.left + "in, dy: -" + (p * ph + margins.top) + "in)[" + canvasCode(this._arrowData) + "]\n";
+        if (nodePageData) out += "        #place(top + left, dx: -" + pm.left + "in, dy: -" + (p * ph + pm.top) + "in)[" + canvasCode(nodePageData) + "]\n";
+        if (this._arrowData) out += "        #place(top + left, dx: -" + pm.left + "in, dy: -" + (p * ph + pm.top) + "in)[" + canvasCode(this._arrowData) + "]\n";
         out += "      ]\n    ]\n";
       } else {
         out += "    #place(top + left, dy: -" + (p * ph) + "in)[" + canvasCode(nodePageData + this._data + this._arrowData) + "]\n";

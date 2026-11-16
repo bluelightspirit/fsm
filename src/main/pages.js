@@ -49,6 +49,124 @@ function pageHeightPx() {
   return Math.round(PAGE_SIZES[pageSizeKey].h * PX_PER_INCH);
 }
 
+// ---- per-page margins ------------------------------------------------------------------------
+// "all":     every page uses pageMargins (the preset or the custom values) - the original behaviour.
+// "edges":   like "all", but the FIRST page's top and the LAST page's bottom can be set separately,
+//            to leave room for text before and after the diagram. With one page both apply to it.
+// "perPage": every page has its own four margins; pages without an entry use pageMargins.
+var MARGIN_MODES = ["all", "edges", "perPage"];
+var pageMarginMode = "all";
+var pageMarginEdges = { firstTop: null, lastBottom: null };   // inches, or null = use pageMargins
+var pageMarginPages = [];                                      // pageMarginPages[p] = {top,bottom,left,right} or null
+
+function clampMarginInches(value, fallback) {
+  var v = Number(value);
+  return value != null && value !== "" && isFinite(v) ? Math.max(0, Math.min(4, v)) : fallback;
+}
+
+function marginsForPage(p) {
+  var last = Math.max(1, pageCount) - 1;
+  p = Math.max(0, Math.min(last, Math.round(Number(p)) || 0));
+  var m = { top: pageMargins.top, bottom: pageMargins.bottom, left: pageMargins.left, right: pageMargins.right };
+  if (pageMarginMode === "edges") {
+    if (p === 0 && pageMarginEdges.firstTop != null) m.top = pageMarginEdges.firstTop;
+    if (p === last && pageMarginEdges.lastBottom != null) m.bottom = pageMarginEdges.lastBottom;
+  } else if (pageMarginMode === "perPage") {
+    var own = pageMarginPages[p];
+    if (own) { m.top = own.top; m.bottom = own.bottom; m.left = own.left; m.right = own.right; }
+  }
+  return m;
+}
+
+function allPageMargins() {
+  var out = [];
+  for (var p = 0; p < pageCount; p++) out.push(marginsForPage(p));
+  return out;
+}
+
+// Exporters accept either one margins object or an object carrying a per-page list in .pages.
+function marginsAt(margins, p) {
+  if (margins && margins.pages && margins.pages.length) {
+    return margins.pages[Math.max(0, Math.min(margins.pages.length - 1, Math.round(Number(p)) || 0))];
+  }
+  return margins;
+}
+
+function pageIndexForY(y) {
+  return Math.max(0, Math.min(Math.max(1, pageCount) - 1, Math.floor(y / pageHeightPx())));
+}
+
+function afterMarginChange(redraw) {
+  if (constrainToMargins && typeof nodes !== "undefined") nodes.forEach(function (node) { constrainNodeToMargins(node); });
+  __pagesLast = "";
+  syncPagesUI();
+  if (redraw && typeof draw === "function") draw();
+}
+
+function setPageMarginMode(mode, redraw) {
+  pageMarginMode = MARGIN_MODES.indexOf(mode) >= 0 ? mode : "all";
+  afterMarginChange(redraw);
+}
+
+function setPageMarginEdges(edges, redraw) {
+  edges = edges || {};
+  pageMarginEdges = {
+    firstTop: edges.firstTop == null || edges.firstTop === "" ? null : clampMarginInches(edges.firstTop, null),
+    lastBottom: edges.lastBottom == null || edges.lastBottom === "" ? null : clampMarginInches(edges.lastBottom, null),
+  };
+  afterMarginChange(redraw);
+}
+
+// margins == null puts that page back on the base margins.
+function setPageMarginPage(p, margins, redraw) {
+  p = Math.max(0, Math.min(MAX_PAGES - 1, Math.round(Number(p)) || 0));
+  if (margins == null) {
+    pageMarginPages[p] = null;
+  } else {
+    pageMarginPages[p] = {
+      top: clampMarginInches(margins.top, pageMargins.top),
+      bottom: clampMarginInches(margins.bottom, pageMargins.bottom),
+      left: clampMarginInches(margins.left, pageMargins.left),
+      right: clampMarginInches(margins.right, pageMargins.right),
+    };
+  }
+  afterMarginChange(redraw);
+}
+
+// Choosing a preset means "use this everywhere", so it clears every override.
+function clearPageMarginOverrides() {
+  pageMarginEdges = { firstTop: null, lastBottom: null };
+  pageMarginPages = [];
+}
+
+function pageMarginSettingsForSave() {
+  return {
+    mode: pageMarginMode,
+    edges: { firstTop: pageMarginEdges.firstTop, lastBottom: pageMarginEdges.lastBottom },
+    pages: pageMarginPages.map(function (m) { return m ? { top: m.top, bottom: m.bottom, left: m.left, right: m.right } : null; }),
+  };
+}
+
+// Tolerant on purpose: files saved before this feature simply have none of these fields.
+function restorePageMarginSettings(data) {
+  data = data || {};
+  pageMarginMode = MARGIN_MODES.indexOf(data.mode) >= 0 ? data.mode : "all";
+  var e = data.edges || {};
+  pageMarginEdges = {
+    firstTop: e.firstTop == null ? null : clampMarginInches(e.firstTop, null),
+    lastBottom: e.lastBottom == null ? null : clampMarginInches(e.lastBottom, null),
+  };
+  pageMarginPages = [];
+  (Array.isArray(data.pages) ? data.pages : []).slice(0, MAX_PAGES).forEach(function (m, i) {
+    pageMarginPages[i] = m && typeof m === "object" ? {
+      top: clampMarginInches(m.top, pageMargins.top),
+      bottom: clampMarginInches(m.bottom, pageMargins.bottom),
+      left: clampMarginInches(m.left, pageMargins.left),
+      right: clampMarginInches(m.right, pageMargins.right),
+    } : null;
+  });
+}
+
 function setPageMargins(margins, redraw) {
   var next = margins || {};
   var preset = inferMarginPreset(next, pageSizeKey);
@@ -76,7 +194,18 @@ function setPageSize(key, redraw) {
   if (redraw && typeof draw === "function") draw();
 }
 
+// The plain fields are what single-flow exports use (top of the first page, bottom of the last page,
+// left/right of the first page); .pages carries one margins object per page for paged exports.
+// In "all" mode these equal the base margins, as before.
 function pageMarginsForExport() {
+  var first = marginsForPage(0), last = marginsForPage(pageCount - 1);
+  return { preset: pageMargins.preset, mode: pageMarginMode,
+           top: first.top, bottom: last.bottom, left: first.left, right: first.right,
+           pages: allPageMargins() };
+}
+
+// The base margins only (what the preset / custom fields hold), for saving.
+function pageBaseMarginsForSave() {
   return { preset: pageMargins.preset, top: pageMargins.top, bottom: pageMargins.bottom, left: pageMargins.left, right: pageMargins.right };
 }
 
@@ -110,17 +239,19 @@ function clampToPrintable(x, y, insetX, insetY) {
   var w = pageWidthPx(), h = pageHeightPx();
   var p = 0, bestDistance = Infinity, bestY = y;
   for (var candidate = 0; candidate < pageCount; candidate++) {
-    var candidateMin = candidate * h + pageMargins.top * PX_PER_INCH + insetY;
-    var candidateMax = (candidate + 1) * h - pageMargins.bottom * PX_PER_INCH - insetY;
+    var cm = marginsForPage(candidate);
+    var candidateMin = candidate * h + cm.top * PX_PER_INCH + insetY;
+    var candidateMax = (candidate + 1) * h - cm.bottom * PX_PER_INCH - insetY;
     if (candidateMax < candidateMin) candidateMin = candidateMax = candidate * h + h / 2;
     var candidateY = Math.max(candidateMin, Math.min(candidateMax, y));
     var distance = Math.abs(candidateY - y);
     if (distance < bestDistance) { bestDistance = distance; p = candidate; bestY = candidateY; }
   }
-  var minX = pageMargins.left * PX_PER_INCH + insetX;
-  var maxX = w - pageMargins.right * PX_PER_INCH - insetX;
-  var minY = p * h + pageMargins.top * PX_PER_INCH + insetY;
-  var maxY = (p + 1) * h - pageMargins.bottom * PX_PER_INCH - insetY;
+  var pm = marginsForPage(p);
+  var minX = pm.left * PX_PER_INCH + insetX;
+  var maxX = w - pm.right * PX_PER_INCH - insetX;
+  var minY = p * h + pm.top * PX_PER_INCH + insetY;
+  var maxY = (p + 1) * h - pm.bottom * PX_PER_INCH - insetY;
   if (maxX < minX) minX = maxX = w / 2;
   if (maxY < minY) minY = maxY = p * h + h / 2;
   return { x: Math.max(minX, Math.min(maxX, x)), y: bestY, page: p };
@@ -135,13 +266,14 @@ function constrainNodeToMargins(node) {
   }
   var insetX = Math.max(nodeRadius, textWidth / 2) + 2;
   var insetY = Math.max(nodeRadius, styleStateFontSize * 0.75) + 2;
-  var minX = pageMargins.left * PX_PER_INCH + insetX;
-  var maxX = w - pageMargins.right * PX_PER_INCH - insetX;
+  var pm = marginsForPage(pageIndexForY(node.y));       // left/right come from the page the state sits on
+  var minX = pm.left * PX_PER_INCH + insetX;
+  var maxX = w - pm.right * PX_PER_INCH - insetX;
   if (maxX < minX) minX = maxX = w / 2;
   node.x = Math.max(minX, Math.min(maxX, node.x));
   // Keep the first page's top boundary, but let states cross every lower
   // page seam. Rendering projects the crossing fragment into the next page.
-  node.y = Math.max(pageMargins.top * PX_PER_INCH + insetY, node.y);
+  node.y = Math.max(marginsForPage(0).top * PX_PER_INCH + insetY, node.y);
 }
 
 function clampNodePosition(x, y) {
@@ -180,10 +312,6 @@ function drawPageGuides(c) {
   var fg = getDrawColors().fg;
   var w = pageWidthPx();
   var h = pageHeightPx();
-  var mt = pageMargins.top * PX_PER_INCH;
-  var mb = pageMargins.bottom * PX_PER_INCH;
-  var ml = pageMargins.left * PX_PER_INCH;
-  var mr = pageMargins.right * PX_PER_INCH;
   c.save();
   if (c.canvas === canvas && typeof c.scale === "function") c.scale(editorPixelRatio(), editorPixelRatio());
   c.globalCompositeOperation = "destination-over";
@@ -192,6 +320,8 @@ function drawPageGuides(c) {
   c.lineWidth = 1;
   for (var p = 0; p < pageCount; p++) {
     var top = p * h;
+    var pm = marginsForPage(p);
+    var mt = pm.top * PX_PER_INCH, mb = pm.bottom * PX_PER_INCH, ml = pm.left * PX_PER_INCH, mr = pm.right * PX_PER_INCH;
     c.globalAlpha = 0.35;
     c.setLineDash([]);
     c.strokeRect(0.5, top + 0.5, w - 1, h - 1);
@@ -235,7 +365,7 @@ function syncPagesUI() {
   info.textContent =
     pageCount + (pageCount === 1 ? " page" : " pages") + " \u00b7 " + size.label + " " +
     size.w.toFixed(2) + "\u00d7" + size.h.toFixed(2) + " in \u00b7 " + PAGE_MARGIN_PRESETS[pageMargins.preset].label +
-    " margins (T " + pageMargins.top + ' in, B ' + pageMargins.bottom + ' in, L ' + pageMargins.left + ' in, R ' + pageMargins.right + " in)";
+    " margins (T " + pageMargins.top + ' in, B ' + pageMargins.bottom + ' in, L ' + pageMargins.left + ' in, R ' + pageMargins.right + " in)" + marginModeSummary();
   remove.disabled = !canRemove;
   remove.title = canRemove || pageCount === 1 ? "" : "Move everything off the last page first";
   add.disabled = pageCount >= MAX_PAGES;
@@ -247,6 +377,153 @@ function syncPagesUI() {
     var input = document.getElementById("page-margin-" + side);
     if (input && document.activeElement !== input) input.value = pageMargins[side];
   });
+  syncMarginModeUI();
+}
+
+// ---- margin-mode controls (they sit under the margin inputs) ---------------------------------
+var __marginUi = null;
+
+function marginModeSummary() {
+  if (pageMarginMode === "edges") {
+    return " \u00b7 first page top " + marginsForPage(0).top + " in, last page bottom " + marginsForPage(pageCount - 1).bottom + " in";
+  }
+  if (pageMarginMode === "perPage") return " \u00b7 custom margins per page";
+  return "";
+}
+
+function marginField(id, text, title) {
+  var wrap = document.createElement("label");
+  wrap.style.cssText = "display:inline-flex;align-items:center;gap:4px";
+  wrap.title = title || "";
+  var span = document.createElement("span");
+  span.textContent = text;
+  var input = document.createElement("input");
+  input.type = "number"; input.min = "0"; input.max = "4"; input.step = "0.05"; input.id = id;
+  input.style.width = "64px";
+  wrap.appendChild(span);
+  wrap.appendChild(input);
+  return { wrap: wrap, input: input };
+}
+
+function buildPerPageRows(ui) {
+  ui.perPage.textContent = "";
+  ui.rows = [];
+  for (var p = 0; p < pageCount; p++) (function (p) {
+    var line = document.createElement("div");
+    line.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap";
+    var name = document.createElement("strong");
+    name.textContent = "Page " + (p + 1);
+    name.style.minWidth = "52px";
+    line.appendChild(name);
+    var fields = {};
+    [["top", "Top"], ["bottom", "Bottom"], ["left", "Left"], ["right", "Right"]].forEach(function (s) {
+      var f = marginField("page-margin-" + p + "-" + s[0], s[1], "Margin on this page only, in inches");
+      fields[s[0]] = f.input;
+      line.appendChild(f.wrap);
+      f.input.addEventListener("change", function () {
+        flushHistory();
+        setPageMarginPage(p, { top: fields.top.value, bottom: fields.bottom.value, left: fields.left.value, right: fields.right.value }, true);
+        commitHistory();
+      });
+    });
+    var reset = document.createElement("button");
+    reset.type = "button";
+    reset.textContent = "Reset";
+    reset.title = "Put this page back on the margins above";
+    reset.addEventListener("click", function () { flushHistory(); setPageMarginPage(p, null, true); commitHistory(); });
+    line.appendChild(reset);
+    ui.perPage.appendChild(line);
+    ui.rows[p] = { fields: fields, reset: reset };
+  })(p);
+}
+
+function syncMarginModeUI() {
+  var ui = __marginUi;
+  if (!ui) return;
+  ui.select.value = pageMarginMode;
+  var hints = {
+    all: "The margins above apply to every page.",
+    edges: "The margins above apply to every page. The two boxes below override the first page's top and the last page's bottom, to leave room for text before and after the diagram. A one-page diagram uses both.",
+    perPage: "Edit each page's margins. Pages you do not edit follow the margins above.",
+  };
+  ui.hint.textContent = hints[pageMarginMode] || "";
+  ui.edges.style.display = pageMarginMode === "edges" ? "flex" : "none";
+  ui.perPage.style.display = pageMarginMode === "perPage" ? "flex" : "none";
+  var active = document.activeElement;
+  if (pageMarginMode === "edges") {
+    [[ui.first.input, pageMarginEdges.firstTop, pageMargins.top], [ui.last.input, pageMarginEdges.lastBottom, pageMargins.bottom]].forEach(function (f) {
+      f[0].placeholder = String(f[2]);
+      if (active !== f[0]) f[0].value = f[1] == null ? "" : String(f[1]);
+    });
+  }
+  if (pageMarginMode === "perPage") {
+    if (ui.rows.length !== pageCount) buildPerPageRows(ui);
+    for (var p = 0; p < pageCount; p++) {
+      var m = marginsForPage(p), row = ui.rows[p];
+      ["top", "bottom", "left", "right"].forEach(function (side) {
+        if (active !== row.fields[side]) row.fields[side].value = String(m[side]);
+      });
+      row.reset.disabled = !pageMarginPages[p];
+    }
+  }
+}
+
+function wirePageMarginModes(anchor) {
+  if (!anchor || !anchor.parentNode || document.getElementById("page-margin-modes")) return;
+  var row = document.createElement("div");
+  row.id = "page-margin-modes";
+  row.style.cssText = "margin:6px 0;font-size:12px;display:flex;flex-direction:column;gap:6px";
+
+  var head = document.createElement("div");
+  head.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap";
+  var label = document.createElement("label");
+  label.textContent = "Margin mode";
+  label.htmlFor = "page-margin-mode";
+  var select = document.createElement("select");
+  select.id = "page-margin-mode";
+  [["all", "Same on every page"], ["edges", "Same, with first-page top / last-page bottom"], ["perPage", "Custom per page"]].forEach(function (o) {
+    var opt = document.createElement("option");
+    opt.value = o[0];
+    opt.textContent = o[1];
+    select.appendChild(opt);
+  });
+  head.appendChild(label);
+  head.appendChild(select);
+
+  var hint = document.createElement("div");
+  hint.style.opacity = "0.75";
+
+  var edges = document.createElement("div");
+  edges.style.cssText = "display:none;align-items:center;gap:12px;flex-wrap:wrap";
+  var first = marginField("page-margin-first-top", "First page top (in)", "Top margin of the first page only. Leave empty to use the top margin above.");
+  var last = marginField("page-margin-last-bottom", "Last page bottom (in)", "Bottom margin of the last page only. Leave empty to use the bottom margin above.");
+  edges.appendChild(first.wrap);
+  edges.appendChild(last.wrap);
+
+  var perPage = document.createElement("div");
+  perPage.id = "page-margin-per-page";
+  perPage.style.cssText = "display:none;flex-direction:column;gap:4px";
+
+  row.appendChild(head);
+  row.appendChild(hint);
+  row.appendChild(edges);
+  row.appendChild(perPage);
+  anchor.parentNode.insertBefore(row, anchor.nextSibling);
+  __marginUi = { row: row, select: select, hint: hint, edges: edges, first: first, last: last, perPage: perPage, rows: [] };
+
+  select.addEventListener("change", function () {
+    flushHistory();
+    setPageMarginMode(select.value, true);
+    commitHistory();
+  });
+  function commitEdges() {
+    flushHistory();
+    setPageMarginEdges({ firstTop: first.input.value, lastBottom: last.input.value }, true);
+    commitHistory();
+  }
+  first.input.addEventListener("change", commitEdges);
+  last.input.addEventListener("change", commitEdges);
+  syncMarginModeUI();
 }
 
 function wirePagesUI() {
@@ -320,6 +597,7 @@ function wirePagesUI() {
   });
   preset.addEventListener("change", function () {
     var p = marginPresetValues(preset.value);
+    clearPageMarginOverrides();
     setPageMargins({ preset: preset.value, top: p.top, bottom: p.bottom, left: p.left, right: p.right }, true);
     ["top", "bottom", "left", "right"].forEach(function (s) { customInputs[s].value = pageMargins[s]; });
     commitHistory();
@@ -328,7 +606,8 @@ function wirePagesUI() {
   canvas.parentNode.insertBefore(row, canvas.nextSibling); // directly under the diagram
   canvas.parentNode.insertBefore(settings, row.nextSibling);
   setPageCount(pageCount); // size the canvas even when nothing was loaded
-  wireTypstHelp(settings);
+  wirePageMarginModes(settings);
+  wireTypstHelp(document.getElementById("page-margin-modes") || settings);
 }
 
 function wireTypstHelp(anchor) {

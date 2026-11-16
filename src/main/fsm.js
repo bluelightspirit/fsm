@@ -116,14 +116,20 @@ function drawText(c, originalText, x, y, angleOrNull, isSelected) {
   if (angleOrNull != null && constrainToMargins && typeof pageHeightPx === "function") {
     var halfLabelWidth = width / 2 + 3;
     var halfLabelHeight = Math.max(fontSize / 2, lines.length * fontSize * 0.575) + 3;
-    var printableLeft = pageMargins.left * PX_PER_INCH;
-    var printableRight = pageWidthPx() - pageMargins.right * PX_PER_INCH;
+    var firstPageMargins = marginsForPage(0);
+    var printableLeft = firstPageMargins.left * PX_PER_INCH;
+    var printableRight = pageWidthPx() - firstPageMargins.right * PX_PER_INCH;
     var printableWidth = Math.max(0, printableRight - printableLeft);
     var clampedHalfWidth = Math.min(halfLabelWidth, printableWidth / 2);
     var bestLabel = null;
     for (var page = 0; page < pageCount; page++) {
-      var top = page * pageHeightPx() + pageMargins.top * PX_PER_INCH;
-      var bottom = (page + 1) * pageHeightPx() - pageMargins.bottom * PX_PER_INCH;
+      var pageMarginsHere = marginsForPage(page);            // each page can have its own margins
+      printableLeft = pageMarginsHere.left * PX_PER_INCH;
+      printableRight = pageWidthPx() - pageMarginsHere.right * PX_PER_INCH;
+      printableWidth = Math.max(0, printableRight - printableLeft);
+      clampedHalfWidth = Math.min(halfLabelWidth, printableWidth / 2);
+      var top = page * pageHeightPx() + pageMarginsHere.top * PX_PER_INCH;
+      var bottom = (page + 1) * pageHeightPx() - pageMarginsHere.bottom * PX_PER_INCH;
       var availableHeight = Math.max(0, bottom - top);
       var clampedHalfHeight = Math.min(halfLabelHeight, availableHeight / 2);
       var minX = printableLeft + clampedHalfWidth;
@@ -213,9 +219,10 @@ function drawUsing(c, colors, ignoreMarginClip, preserveCanvas) {
   if (!ignoreMarginClip && constrainToMargins && typeof c.rect === "function" && typeof c.clip === "function") {
     c.beginPath();
     for (var p = 0; p < pageCount; p++) {
-      c.rect(pageMargins.left * PX_PER_INCH, p * pageHeightPx() + pageMargins.top * PX_PER_INCH,
-        pageWidthPx() - (pageMargins.left + pageMargins.right) * PX_PER_INCH,
-        pageHeightPx() - (pageMargins.top + pageMargins.bottom) * PX_PER_INCH);
+      var pgClip = marginsForPage(p);
+      c.rect(pgClip.left * PX_PER_INCH, p * pageHeightPx() + pgClip.top * PX_PER_INCH,
+        pageWidthPx() - (pgClip.left + pgClip.right) * PX_PER_INCH,
+        pageHeightPx() - (pgClip.top + pgClip.bottom) * PX_PER_INCH);
     }
     c.clip();
   }
@@ -230,17 +237,17 @@ function drawUsing(c, colors, ignoreMarginClip, preserveCanvas) {
   }
   if (constrainToMargins) {
     var ph = pageHeightPx();
-    var topInset = pageMargins.top * PX_PER_INCH;
-    var bottomInset = pageMargins.bottom * PX_PER_INCH;
-    var seamGap = (pageMargins.top + pageMargins.bottom) * PX_PER_INCH;
     for (var page = 0; page < pageCount; page++) {
+      var pgMargins = marginsForPage(page);
+      var topInset = pgMargins.top * PX_PER_INCH;
+      var bottomInset = pgMargins.bottom * PX_PER_INCH;
       if (typeof c.beginNodeClip === "function") {
-        c.beginNodeClip(page, pageMargins, PX_PER_INCH, pageWidthPx(), ph);
+        c.beginNodeClip(page, pgMargins, PX_PER_INCH, pageWidthPx(), ph);
       } else if (typeof c.rect === "function" && typeof c.clip === "function") {
         c.save();
         c.beginPath();
-        c.rect(pageMargins.left * PX_PER_INCH, page * ph + topInset,
-          pageWidthPx() - (pageMargins.left + pageMargins.right) * PX_PER_INCH,
+        c.rect(pgMargins.left * PX_PER_INCH, page * ph + topInset,
+          pageWidthPx() - (pgMargins.left + pgMargins.right) * PX_PER_INCH,
           ph - topInset - bottomInset);
         c.clip();
       }
@@ -249,12 +256,14 @@ function drawUsing(c, colors, ignoreMarginClip, preserveCanvas) {
         var reach = Math.max(nodeRadius, styleStateFontSize * 0.75) + 2;
         drawNode(node, 0); // the state’s ordinary position on this page
         if (page > 0) {
-          var priorBottom = page * ph - bottomInset;
-          if (Math.abs(node.y - priorBottom) <= reach) drawNode(node, seamGap);
+          var prevMargins = marginsForPage(page - 1);
+          var priorBottom = page * ph - prevMargins.bottom * PX_PER_INCH;
+          if (Math.abs(node.y - priorBottom) <= reach) drawNode(node, (prevMargins.bottom + pgMargins.top) * PX_PER_INCH);
         }
         if (page + 1 < pageCount) {
-          var nextTop = (page + 1) * ph + topInset;
-          if (Math.abs(node.y - nextTop) <= reach) drawNode(node, -seamGap);
+          var nextMargins = marginsForPage(page + 1);
+          var nextTop = (page + 1) * ph + nextMargins.top * PX_PER_INCH;
+          if (Math.abs(node.y - nextTop) <= reach) drawNode(node, -(pgMargins.bottom + nextMargins.top) * PX_PER_INCH);
         }
       }
       if (typeof c.endNodeClip === "function") c.endNodeClip();
@@ -265,7 +274,7 @@ function drawUsing(c, colors, ignoreMarginClip, preserveCanvas) {
   }
   var arrowClip = false;
   if (constrainToMargins && !ignoreMarginClip && typeof c.beginArrowClip === "function") {
-    c.beginArrowClip(pageCount, pageMargins, PX_PER_INCH, pageWidthPx(), pageHeightPx());
+    c.beginArrowClip(pageCount, pageMarginsForExport(), PX_PER_INCH, pageWidthPx(), pageHeightPx());
     arrowClip = true;
   }
   for (var i = 0; i < links.length; i++) {

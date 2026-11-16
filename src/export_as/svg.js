@@ -18,7 +18,8 @@ function ExportAsSVG() {
   this.beginArrowClip = function (pages, margins, ppi, pageW, pageH) {
     var rects = [];
     for (var p = 0; p < pages; p++) {
-      rects.push('<rect x="' + margins.left * ppi + '" y="' + (p * pageH + margins.top * ppi) + '" width="' + (pageW - (margins.left + margins.right) * ppi) + '" height="' + (pageH - (margins.top + margins.bottom) * ppi) + '"/>');
+      var pm = typeof marginsAt === "function" ? marginsAt(margins, p) : (margins && margins.pages ? margins.pages[p] : margins);
+      rects.push('<rect x="' + pm.left * ppi + '" y="' + (p * pageH + pm.top * ppi) + '" width="' + (pageW - (pm.left + pm.right) * ppi) + '" height="' + (pageH - (pm.top + pm.bottom) * ppi) + '"/>');
     }
     this._svgData += '<defs><clipPath id="fsm-arrow-pages" clipPathUnits="userSpaceOnUse">' + rects.join("") + '</clipPath></defs>\n<g clip-path="url(#fsm-arrow-pages)">\n';
   };
@@ -68,8 +69,9 @@ function ExportAsSVG() {
     var outH = paged ? pageH : pageH * pages;
     var body = paged ? '<g transform="translate(0 ' + (-top) + ')">\n' + this._svgData + "</g>\n" : this._svgData;
     if (paged && constrainMargins) {
+      var pm = typeof marginsAt === "function" ? marginsAt(margins, pageIndex || 0) : (margins && margins.pages ? margins.pages[pageIndex || 0] : margins);
       var clipId = "fsm-printable-page";
-      var clip = '<defs><clipPath id="' + clipId + '" clipPathUnits="userSpaceOnUse"><rect x="' + margins.left * PX_PER_INCH + '" y="' + margins.top * PX_PER_INCH + '" width="' + (pageW - (margins.left + margins.right) * PX_PER_INCH) + '" height="' + (pageH - (margins.top + margins.bottom) * PX_PER_INCH) + '"/></clipPath></defs>\n';
+      var clip = '<defs><clipPath id="' + clipId + '" clipPathUnits="userSpaceOnUse"><rect x="' + pm.left * PX_PER_INCH + '" y="' + pm.top * PX_PER_INCH + '" width="' + (pageW - (pm.left + pm.right) * PX_PER_INCH) + '" height="' + (pageH - (pm.top + pm.bottom) * PX_PER_INCH) + '"/></clipPath></defs>\n';
       body = clip + '<g clip-path="url(#' + clipId + ')">\n' + body + '</g>\n';
     }
     return (

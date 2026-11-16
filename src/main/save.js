@@ -2,7 +2,16 @@
 // Reads/writes the active FSM via Workspace.
 
 function serializeState() {
-  var data = { nodes: [], links: [], style: getStyle(), pages: pageCount, pageSize: pageSizeKey, margins: pageMarginsForExport(), constrainToMargins: constrainToMargins };
+  var data = {
+    nodes: [],
+    links: [],
+    style: getStyle(),
+    pages: pageCount,
+    pageSize: pageSizeKey,
+    margins: typeof pageBaseMarginsForSave === "function" ? pageBaseMarginsForSave() : pageMarginsForExport(),
+    marginSettings: typeof pageMarginSettingsForSave === "function" ? pageMarginSettingsForSave() : null,
+    constrainToMargins: constrainToMargins
+  };
   for (var i = 0; i < nodes.length; i++) {
     var node = nodes[i];
     data.nodes.push({
@@ -62,7 +71,11 @@ function deserializeState(data) {
   setPageSize(data.pageSize || "letter", false);
   setPageCount(data.pages || 1);
   setPageMargins(data.margins || PAGE_MARGIN_PRESETS.apa, false);
+  if (typeof restorePageMarginSettings === "function") {
+    restorePageMarginSettings(data.marginSettings || (data.margins && data.margins.mode ? data.margins : {}));
+  }
   setConstrainToMargins(data.constrainToMargins !== false, false);
+  if (typeof syncPagesUI === "function") syncPagesUI();
   if (typeof syncStyleInputs === "function") syncStyleInputs();
   for (var i = 0; i < data.nodes.length; i++) {
     var bn = data.nodes[i];
