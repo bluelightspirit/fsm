@@ -26,710 +26,6 @@
  OTHER DEALINGS IN THE SOFTWARE.
 */
 
-function Link(a, b) {
-  this.nodeA = a;
-  this.nodeB = b;
-  this.text = "";
-  this.lineAngleAdjust = 0; // value to add to textAngle when link is straight line
-  this.labelDx = 0; // manual label offset (Alt+drag)
-  this.labelDy = 0;
-
-  // make anchor point relative to the locations of nodeA and nodeB
-  this.parallelPart = 0.5; // percentage from nodeA to nodeB
-  this.perpendicularPart = 0; // pixels from line between nodeA and nodeB
-  this.curvePoints = null; // three route handles for the whole link
-}
-
-Link.prototype._curvePageBreaks = function (start, end) {
-  var ph = typeof pageHeightPx === "function" ? pageHeightPx() : 1056;
-  var lo = Math.min(start.y, end.y), hi = Math.max(start.y, end.y);
-  var breaks = [0, 1];
-  if (Math.abs(end.y - start.y) > 1e-6) {
-    for (var y = (Math.floor(lo / ph) + 1) * ph; y < hi - 1e-6; y += ph) {
-      var t = (y - start.y) / (end.y - start.y);
-      if (t > 1e-6 && t < 1 - 1e-6) breaks.push(t);
-    }
-  }
-  breaks.sort(function (a, b) { return a - b; });
-  return breaks;
-};
-
-Link.prototype._linkCenters = function () {
-  var ph = pageHeightPx(), gap = (pageMargins.top + pageMargins.bottom) * PX_PER_INCH;
-  var reach = Math.max(nodeRadius, styleStateFontSize * 0.75) + 2;
-  function candidates(node) {
-    var out = [{ x: node.x, y: node.y }];
-    for (var p = 0; p + 1 < pageCount; p++) {
-      var nextTop = (p + 1) * ph + pageMargins.top * PX_PER_INCH;
-      var priorBottom = (p + 1) * ph - pageMargins.bottom * PX_PER_INCH;
-      if (Math.abs(node.y - nextTop) <= reach) out.push({ x: node.x, y: node.y - gap });
-      if (Math.abs(node.y - priorBottom) <= reach) out.push({ x: node.x, y: node.y + gap });
-    }
-    return out;
-  }
-  function choose(node, highY) {
-    var list = candidates(node), best = list[0];
-    for (var i = 1; i < list.length; i++) {
-      if (highY ? list[i].y > best.y : list[i].y < best.y) best = list[i];
-    }
-    return best;
-  }
-  // When either state straddles a page seam, route from the fragment on the
-  // source side toward the fragment on the destination side. This lets the
-  // curve continue across the printable-area gap instead of ending in it.
-  var down = this.nodeB.y >= this.nodeA.y;
-  var a = choose(this.nodeA, !down), b = choose(this.nodeB, down);
-  return { a: a, b: b };
-};
-
-Link.prototype._visibleCirclePoint = function (node, center, toward, inset, preferredPage) {
-  var radius = nodeRadius;
-  if (!constrainToMargins || typeof pageHeightPx !== "function" || typeof pageWidthPx !== "function") {
-    var vx = toward.x - center.x, vy = toward.y - center.y;
-    var vl = Math.sqrt(vx * vx + vy * vy) || 1;
-    return { x: center.x + vx / vl * radius, y: center.y + vy / vl * radius };
-  }
-  var ph = pageHeightPx();
-  var pad = Math.max(0, inset || 0) + Math.max(1, styleLineWidth || 1);
-  var left = pageMargins.left * PX_PER_INCH + pad;
-  var right = pageWidthPx() - pageMargins.right * PX_PER_INCH - pad;
-  var reach = Math.max(radius, styleStateFontSize * 0.75) + 2;
-  var gap = (pageMargins.top + pageMargins.bottom) * PX_PER_INCH;
-  var circleCenters = [{ x: node.x, y: node.y }];
-  for (var p = 0; p + 1 < pageCount; p++) {
-    var nextTop = (p + 1) * ph + pageMargins.top * PX_PER_INCH;
-    var priorBottom = (p + 1) * ph - pageMargins.bottom * PX_PER_INCH;
-    if (Math.abs(node.y - nextTop) <= reach) circleCenters.push({ x: node.x, y: node.y - gap });
-    if (Math.abs(node.y - priorBottom) <= reach) circleCenters.push({ x: node.x, y: node.y + gap });
-  }
-  preferredPage = preferredPage == null
-    ? Math.max(0, Math.min(pageCount - 1, Math.floor(node.y / ph)))
-    : Math.max(0, Math.min(pageCount - 1, preferredPage));
-  var best = null, bestScore = Infinity;
-  // Check every rendered fragment of a split state, preferring the fragment
-  // at the state's actual page position. That lets an arrow from page 2 attach
-  // to the visible page 1 arc instead of being stuck on its duplicate.
-  circleCenters.forEach(function (circleCenter) {
-    var page = Math.max(0, Math.min(pageCount - 1, Math.floor(circleCenter.y / ph)));
-    var top = page * ph + pageMargins.top * PX_PER_INCH + pad;
-    var bottom = (page + 1) * ph - pageMargins.bottom * PX_PER_INCH - pad;
-    var targetAngle = Math.atan2(toward.y - circleCenter.y, toward.x - circleCenter.x);
-    for (var i = 0; i < 720; i++) {
-      var angle = Math.PI * 2 * i / 720;
-      var x = circleCenter.x + Math.cos(angle) * radius, y = circleCenter.y + Math.sin(angle) * radius;
-      if (x < left || x > right || y < top || y > bottom) continue;
-      var delta = Math.atan2(Math.sin(angle - targetAngle), Math.cos(angle - targetAngle));
-      var score = Math.abs(page - preferredPage) * 100 + delta * delta;
-      if (score < bestScore) { bestScore = score; best = { x: x, y: y }; }
-    }
-  });
-  if (best) return best;
-  var dx = toward.x - center.x, dy = toward.y - center.y, length = Math.sqrt(dx * dx + dy * dy) || 1;
-  return { x: center.x + dx / length * radius, y: center.y + dy / length * radius };
-};
-
-Link.prototype._ensureCurvePoints = function (count, pageBreaks) {
-  var centers = this._linkCenters();
-  var dx = centers.b.x - centers.a.x, dy = centers.b.y - centers.a.y;
-  var length = Math.sqrt(dx * dx + dy * dy) || 1;
-  // Convert saved per-page cubic handles to three whole-link handles. This
-  // keeps imported older links editable while dropping the page-count-based UI.
-  if (Array.isArray(this.curvePoints) && this.curvePoints.length && typeof this.curvePoints[0].t !== "number") {
-    var oldBreaks = pageBreaks || this._curvePageBreaks(centers.a, centers.b);
-    var oldHandles = [];
-    this.curvePoints.forEach(function (seg, i) {
-      if (!seg || !seg.c1 || !seg.c2) return;
-      [seg.c1, seg.c2].forEach(function (point) {
-        var t0 = oldBreaks[i], t1 = oldBreaks[i + 1];
-        var px = centers.a.x + dx * (t0 + (t1 - t0) * point.parallel) - (dy / length) * point.perpendicular;
-        var py = centers.a.y + dy * (t0 + (t1 - t0) * point.parallel) + (dx / length) * point.perpendicular;
-        var t = ((px - centers.a.x) * dx + (py - centers.a.y) * dy) / (length * length);
-        var perp = (dx * (py - centers.a.y) - dy * (px - centers.a.x)) / length;
-        oldHandles.push({ t: t, perpendicular: perp });
-      });
-    });
-    oldHandles.sort(function (a, b) { return a.t - b.t; });
-    this.curvePoints = [0.25, 0.5, 0.75].map(function (target) {
-      if (!oldHandles.length) return { t: target, perpendicular: 0 };
-      var best = oldHandles[0];
-      oldHandles.forEach(function (point) { if (Math.abs(point.t - target) < Math.abs(best.t - target)) best = point; });
-      return { t: target, perpendicular: best.perpendicular };
-    });
-  }
-  if (!Array.isArray(this.curvePoints)) this.curvePoints = [];
-  if (!this.curvePoints.length) {
-    var base = this.perpendicularPart || 0;
-    this.curvePoints = [0.25, 0.5, 0.75].map(function (t) { return { t: t, perpendicular: base * (1 - Math.abs(2 * t - 1)) }; });
-  }
-};
-
-Link.prototype.getCurveHandles = function () {
-  if (!this.perpendicularPart && !this.curvePoints) return [];
-  var centers = this._linkCenters();
-  this._ensureCurvePoints();
-  var dx = centers.b.x - centers.a.x, dy = centers.b.y - centers.a.y;
-  var length = Math.sqrt(dx * dx + dy * dy) || 1;
-  return this.curvePoints.map(function (point, i) {
-    return {
-      x: centers.a.x + dx * point.t - (dy / length) * point.perpendicular,
-      y: centers.a.y + dy * point.t + (dx / length) * point.perpendicular,
-      segment: i,
-    };
-  });
-};
-
-Link.prototype.moveCurveHandle = function (handleIndex, x, y) {
-  var handles = this.getCurveHandles();
-  var handle = handles[handleIndex];
-  if (!handle) return;
-  var centers = this._linkCenters();
-  var dx = centers.b.x - centers.a.x, dy = centers.b.y - centers.a.y;
-  var length2 = dx * dx + dy * dy || 1;
-  if (typeof pageHeightPx === "function") {
-    x = Math.max(2, Math.min(pageWidthPx() - 2, x));
-    y = Math.max(2, Math.min(pageCount * pageHeightPx() - 2, y));
-  }
-  var parallel = ((x - centers.a.x) * dx + (y - centers.a.y) * dy) / length2;
-  var perpendicular = (dx * (y - centers.a.y) - dy * (x - centers.a.x)) / Math.sqrt(length2);
-  var spec = this.curvePoints[handle.segment];
-  spec.t = Math.max(-0.5, Math.min(1.5, parallel));
-  spec.perpendicular = Math.max(-pageHeightPx(), Math.min(pageHeightPx(), perpendicular));
-  this.perpendicularPart = Math.abs(spec.perpendicular) > 0.5 ? this.perpendicularPart || 1 : this.perpendicularPart;
-};
-
-Link.prototype.getAnchorPoint = function () {
-  var dx = this.nodeB.x - this.nodeA.x;
-  var dy = this.nodeB.y - this.nodeA.y;
-  var scale = Math.sqrt(dx * dx + dy * dy);
-  if (scale < 1e-6) return { x: this.nodeA.x, y: this.nodeA.y };
-  var x =
-    this.nodeA.x +
-    dx * this.parallelPart -
-    (dy * this.perpendicularPart) / scale;
-  var y =
-    this.nodeA.y +
-    dy * this.parallelPart +
-    (dx * this.perpendicularPart) / scale;
-  var padding = Math.max(2, styleLineWidth || 1);
-  var maxX = typeof pageWidthPx === "function" ? pageWidthPx() - padding : Infinity;
-  var maxY = typeof pageHeightPx === "function" && typeof pageCount !== "undefined"
-    ? pageHeightPx() * pageCount - padding
-    : Infinity;
-  return {
-    x: Math.max(padding, Math.min(maxX, x)),
-    y: Math.max(padding, Math.min(maxY, y)),
-  };
-};
-
-Link.prototype.setAnchorPoint = function (x, y) {
-  var previousPerpendicular = this.perpendicularPart;
-  var dx = this.nodeB.x - this.nodeA.x;
-  var dy = this.nodeB.y - this.nodeA.y;
-  var scale = Math.sqrt(dx * dx + dy * dy);
-  if (scale < 1e-6) return;
-  if (typeof pageWidthPx === "function" && typeof pageHeightPx === "function") {
-    x = Math.max(2, Math.min(pageWidthPx() - 2, x));
-    y = Math.max(2, Math.min(pageHeightPx() * pageCount - 2, y));
-  }
-  this.parallelPart =
-    (dx * (x - this.nodeA.x) + dy * (y - this.nodeA.y)) / (scale * scale);
-  this.perpendicularPart =
-    (dx * (y - this.nodeA.y) - dy * (x - this.nodeA.x)) / scale;
-  // Dragging the curve itself moves every page segment with the legacy anchor.
-  // Keep the whole-link handles moving with the legacy curve anchor.
-  if (Array.isArray(this.curvePoints) && this.curvePoints.length) {
-    var delta = this.perpendicularPart - previousPerpendicular;
-    this.curvePoints.forEach(function (point) { if (point && typeof point.perpendicular === "number") point.perpendicular += delta; });
-  }
-  // snap to a straight line
-  if (
-    this.parallelPart > 0 &&
-    this.parallelPart < 1 &&
-    Math.abs(this.perpendicularPart) < snapToPadding
-  ) {
-    this.lineAngleAdjust = (this.perpendicularPart < 0) * Math.PI;
-    this.perpendicularPart = 0;
-  }
-};
-
-Link.prototype.getEndPointsAndCircle = function () {
-  if (this.perpendicularPart == 0 && !this.curvePoints) {
-    var midX = (this.nodeA.x + this.nodeB.x) / 2;
-    var midY = (this.nodeA.y + this.nodeB.y) / 2;
-    var start = this.nodeA.closestPointOnCircle(midX, midY);
-    var end = this.nodeB.closestPointOnCircle(midX, midY);
-    return {
-      hasCircle: false,
-      startX: start.x,
-      startY: start.y,
-      endX: end.x,
-      endY: end.y,
-    };
-  }
-  var anchor = this.getAnchorPoint();
-  // A quadratic curve uses the dragged anchor as its control point. Unlike a
-  // circumcircle through the anchor, the curve stays inside the convex hull
-  // of its endpoints and control point, so it cannot balloon off the paper.
-  var centers = this._linkCenters();
-  var a = centers.a, b = centers.b;
-  var handles = this.getCurveHandles();
-  var first = handles[0] || anchor, last = handles[handles.length - 1] || anchor;
-  var ax = first.x - a.x, ay = first.y - a.y;
-  var bx = b.x - last.x, by = b.y - last.y;
-  var al = Math.sqrt(ax * ax + ay * ay), bl = Math.sqrt(bx * bx + by * by);
-  if (al < 1e-6) { ax = b.x - a.x; ay = b.y - a.y; al = Math.sqrt(ax * ax + ay * ay) || 1; }
-  if (bl < 1e-6) { bx = b.x - a.x; by = b.y - a.y; bl = Math.sqrt(bx * bx + by * by) || 1; }
-  var sourcePage = Math.max(0, Math.min(pageCount - 1, Math.floor(a.y / pageHeightPx())));
-  var start = this._visibleCirclePoint(this.nodeA, a, { x: a.x + ax, y: a.y + ay }, 0, sourcePage);
-  // The final route handle selects which visible copy of a split destination
-  // receives the arrowhead. Dragging that handle across a page break switches
-  // between the page fragments instead of locking the tip to the source page.
-  var targetPage = Math.max(0, Math.min(pageCount - 1, Math.floor(last.y / pageHeightPx())));
-  var end = this._visibleCirclePoint(this.nodeB, b, { x: b.x - bx, y: b.y - by }, styleArrowSize || 0, targetPage);
-  var startX = start.x, startY = start.y;
-  var endX = end.x, endY = end.y;
-  // The three route handles shape one continuous curve. Page clipping cuts
-  // that curve at printable boundaries, so the number of pages never adds dots.
-  this._ensureCurvePoints();
-  handles = this.getCurveHandles();
-  var route = [{ x: startX, y: startY }].concat(handles, [{ x: endX, y: endY }]);
-  var segments = [];
-  for (var si = 0; si < route.length - 1; si++) {
-    var previous = route[Math.max(0, si - 1)], current = route[si];
-    var next = route[si + 1], following = route[Math.min(route.length - 1, si + 2)];
-    segments.push({
-      startX: current.x, startY: current.y,
-      endX: next.x, endY: next.y,
-      control1X: current.x + (next.x - previous.x) / 6,
-      control1Y: current.y + (next.y - previous.y) / 6,
-      control2X: next.x - (following.x - current.x) / 6,
-      control2Y: next.y - (following.y - current.y) / 6,
-    });
-  }
-  return {
-    hasCircle: false,
-    hasCurve: true,
-    startX: startX,
-    startY: startY,
-    endX: endX,
-    endY: endY,
-    controlX: anchor.x,
-    controlY: anchor.y,
-    segments: segments,
-  };
-};
-
-Link.prototype.draw = function (c) {
-  var stuff = this.getEndPointsAndCircle();
-  // draw arc
-  c.beginPath();
-  if (stuff.hasCircle) {
-    c.arc(
-      stuff.circleX,
-      stuff.circleY,
-      stuff.circleRadius,
-      stuff.startAngle,
-      stuff.endAngle,
-      stuff.isReversed,
-    );
-  } else if (stuff.hasCurve) {
-    c.moveTo(stuff.startX, stuff.startY);
-    for (var si = 0; si < stuff.segments.length; si++) {
-      var segment = stuff.segments[si];
-      c.bezierCurveTo(segment.control1X, segment.control1Y, segment.control2X, segment.control2Y, segment.endX, segment.endY);
-    }
-  } else {
-    c.moveTo(stuff.startX, stuff.startY);
-    c.lineTo(stuff.endX, stuff.endY);
-  }
-  c.stroke();
-  // draw the head of the arrow
-  if (stuff.hasCurve) {
-    var finalSegment = stuff.segments[stuff.segments.length - 1];
-    var tangentX = stuff.endX - finalSegment.control2X;
-    var tangentY = stuff.endY - finalSegment.control2Y;
-    drawArrow(c, stuff.endX, stuff.endY, Math.atan2(tangentY, tangentX));
-  } else if (stuff.hasCircle) {
-    drawArrow(
-      c,
-      stuff.endX,
-      stuff.endY,
-      stuff.endAngle - stuff.reverseScale * (Math.PI / 2),
-    );
-  } else {
-    drawArrow(
-      c,
-      stuff.endX,
-      stuff.endY,
-      Math.atan2(stuff.endY - stuff.startY, stuff.endX - stuff.startX),
-    );
-  }
-  // draw the text
-  if (stuff.hasCurve) {
-    var middle = stuff.segments[Math.floor(stuff.segments.length / 2)];
-    var textX = (middle.startX + 3 * middle.control1X + 3 * middle.control2X + middle.endX) / 8;
-    var textY = (middle.startY + 3 * middle.control1Y + 3 * middle.control2Y + middle.endY) / 8;
-    var textAngle = Math.atan2(stuff.endY - stuff.startY, stuff.endX - stuff.startX);
-    drawText(c, this.text, textX + this.labelDx, textY + this.labelDy, textAngle, selectedObject == this);
-  } else if (stuff.hasCircle) {
-    var startAngle = stuff.startAngle;
-    var endAngle = stuff.endAngle;
-    if (endAngle < startAngle) {
-      endAngle += Math.PI * 2;
-    }
-    var textAngle = (startAngle + endAngle) / 2 + stuff.isReversed * Math.PI;
-    var textX = stuff.circleX + stuff.circleRadius * Math.cos(textAngle);
-    var textY = stuff.circleY + stuff.circleRadius * Math.sin(textAngle);
-    drawText(
-      c,
-      this.text,
-      textX + this.labelDx,
-      textY + this.labelDy,
-      textAngle,
-      selectedObject == this,
-    );
-  } else {
-    var textX = (stuff.startX + stuff.endX) / 2;
-    var textY = (stuff.startY + stuff.endY) / 2;
-    var textAngle = Math.atan2(
-      stuff.endX - stuff.startX,
-      stuff.startY - stuff.endY,
-    );
-    drawText(
-      c,
-      this.text,
-      textX + this.labelDx,
-      textY + this.labelDy,
-      textAngle + this.lineAngleAdjust,
-      selectedObject == this,
-    );
-  }
-  if (stuff.hasCurve && (c.canvas !== canvas ? includeCurveHandlesInExports : false)) this.drawCurveHandles(c);
-};
-
-Link.prototype.drawCurveHandles = function (c) {
-  var handles = this.getCurveHandles();
-  c.save(); c.fillStyle = "white"; c.strokeStyle = "black"; c.lineWidth = 2;
-  for (var i = 0; i < handles.length; i++) {
-    if (typeof c.drawCurveHandle === "function") c.drawCurveHandle(handles[i].x, handles[i].y, 6);
-    else { c.beginPath(); c.arc(handles[i].x, handles[i].y, 6, 0, Math.PI * 2); c.fill(); c.stroke(); }
-  }
-  c.restore();
-};
-
-Link.prototype.containsPoint = function (x, y, extraTolerance) {
-  var tolerance = hitTargetPadding + (extraTolerance || 0);
-  var stuff = this.getEndPointsAndCircle();
-  if (stuff.hasCircle) {
-    var dx = x - stuff.circleX;
-    var dy = y - stuff.circleY;
-    var distance = Math.sqrt(dx * dx + dy * dy) - stuff.circleRadius;
-    if (Math.abs(distance) < tolerance) {
-      var angle = Math.atan2(dy, dx);
-      var startAngle = stuff.startAngle;
-      var endAngle = stuff.endAngle;
-      if (stuff.isReversed) {
-        var temp = startAngle;
-        startAngle = endAngle;
-        endAngle = temp;
-      }
-      if (endAngle < startAngle) {
-        endAngle += Math.PI * 2;
-      }
-      if (angle < startAngle) {
-        angle += Math.PI * 2;
-      } else if (angle > endAngle) {
-        angle -= Math.PI * 2;
-      }
-      return angle > startAngle && angle < endAngle;
-    }
-  } else if (stuff.hasCurve) {
-    for (var si = 0; si < stuff.segments.length; si++) {
-      var seg = stuff.segments[si], previous = { x: seg.startX, y: seg.startY };
-      for (var i = 1; i <= 24; i++) {
-        var t = i / 24, u = 1 - t;
-        var current = {
-          x: u * u * u * seg.startX + 3 * u * u * t * seg.control1X + 3 * u * t * t * seg.control2X + t * t * t * seg.endX,
-          y: u * u * u * seg.startY + 3 * u * u * t * seg.control1Y + 3 * u * t * t * seg.control2Y + t * t * t * seg.endY,
-        };
-        var dx = current.x - previous.x, dy = current.y - previous.y;
-        var length2 = dx * dx + dy * dy;
-        var percent = length2 ? Math.max(0, Math.min(1, ((x - previous.x) * dx + (y - previous.y) * dy) / length2)) : 0;
-        var distanceX = x - (previous.x + percent * dx), distanceY = y - (previous.y + percent * dy);
-        if (Math.sqrt(distanceX * distanceX + distanceY * distanceY) < tolerance) return true;
-        previous = current;
-      }
-    }
-  } else {
-    var dx = stuff.endX - stuff.startX;
-    var dy = stuff.endY - stuff.startY;
-    var length = Math.sqrt(dx * dx + dy * dy);
-    var percent =
-      (dx * (x - stuff.startX) + dy * (y - stuff.startY)) / (length * length);
-    var distance = (dx * (y - stuff.startY) - dy * (x - stuff.startX)) / length;
-    return percent > 0 && percent < 1 && Math.abs(distance) < tolerance;
-  }
-  return false;
-};
-
-Link.prototype.getCurveHandleAt = function (x, y) {
-  if (!showCurveHandles || this !== selectedObject || (!this.perpendicularPart && !this.curvePoints)) return -1;
-  var handles = this.getCurveHandles();
-  for (var i = handles.length - 1; i >= 0; i--) {
-    var dx = handles[i].x - x, dy = handles[i].y - y;
-    if (dx * dx + dy * dy <= 12 * 12) return i;
-  }
-  return -1;
-};
-
-function Node(x, y) {
-  this.x = x;
-  this.y = y;
-  this.mouseOffsetX = 0;
-  this.mouseOffsetY = 0;
-  this.isAcceptState = false;
-  this.text = "";
-}
-
-Node.prototype.setMouseStart = function (x, y) {
-  this.mouseOffsetX = this.x - x;
-  this.mouseOffsetY = this.y - y;
-};
-
-Node.prototype.setAnchorPoint = function (x, y) {
-  this.x = x + this.mouseOffsetX;
-  this.y = y + this.mouseOffsetY;
-};
-
-Node.prototype.draw = function (c) {
-  // draw the circle
-  c.beginPath();
-  c.arc(this.x, this.y, nodeRadius, 0, 2 * Math.PI, false);
-  c.stroke();
-
-  // draw the text
-  drawText(c, this.text, this.x, this.y, null, selectedObject == this);
-
-  // draw a double circle for an accept state
-  if (this.isAcceptState) {
-    c.beginPath();
-    c.arc(this.x, this.y, nodeRadius - 6, 0, 2 * Math.PI, false);
-    c.stroke();
-  }
-};
-
-Node.prototype.closestPointOnCircle = function (x, y) {
-  var dx = x - this.x;
-  var dy = y - this.y;
-  var scale = Math.sqrt(dx * dx + dy * dy);
-  return {
-    x: this.x + (dx * nodeRadius) / scale,
-    y: this.y + (dy * nodeRadius) / scale,
-  };
-};
-
-Node.prototype.containsPoint = function (x, y, extraTolerance) {
-  var radius = nodeRadius + (extraTolerance || 0);
-  return (
-    (x - this.x) * (x - this.x) + (y - this.y) * (y - this.y) < radius * radius
-  );
-};
-
-function SelfLink(node, mouse) {
-  this.node = node;
-  this.anchorAngle = 0;
-  this.mouseOffsetAngle = 0;
-  this.text = "";
-  this.labelDx = 0;
-  this.labelDy = 0;
-
-  if (mouse) {
-    this.setAnchorPoint(mouse.x, mouse.y);
-  }
-}
-
-SelfLink.prototype.setMouseStart = function (x, y) {
-  this.mouseOffsetAngle =
-    this.anchorAngle - Math.atan2(y - this.node.y, x - this.node.x);
-};
-
-SelfLink.prototype.setAnchorPoint = function (x, y) {
-  this.anchorAngle =
-    Math.atan2(y - this.node.y, x - this.node.x) + this.mouseOffsetAngle;
-  // snap to 90 degrees
-  var snap = Math.round(this.anchorAngle / (Math.PI / 2)) * (Math.PI / 2);
-  if (Math.abs(this.anchorAngle - snap) < 0.1) this.anchorAngle = snap;
-  // keep in the range -pi to pi so our containsPoint() function always works
-  if (this.anchorAngle < -Math.PI) this.anchorAngle += 2 * Math.PI;
-  if (this.anchorAngle > Math.PI) this.anchorAngle -= 2 * Math.PI;
-};
-
-SelfLink.prototype.getEndPointsAndCircle = function () {
-  var circleX = this.node.x + 1.5 * nodeRadius * Math.cos(this.anchorAngle);
-  var circleY = this.node.y + 1.5 * nodeRadius * Math.sin(this.anchorAngle);
-  var circleRadius = 0.75 * nodeRadius;
-  var startAngle = this.anchorAngle - Math.PI * 0.8;
-  var endAngle = this.anchorAngle + Math.PI * 0.8;
-  var startX = circleX + circleRadius * Math.cos(startAngle);
-  var startY = circleY + circleRadius * Math.sin(startAngle);
-  var endX = circleX + circleRadius * Math.cos(endAngle);
-  var endY = circleY + circleRadius * Math.sin(endAngle);
-  return {
-    hasCircle: true,
-    startX: startX,
-    startY: startY,
-    endX: endX,
-    endY: endY,
-    startAngle: startAngle,
-    endAngle: endAngle,
-    circleX: circleX,
-    circleY: circleY,
-    circleRadius: circleRadius,
-  };
-};
-
-SelfLink.prototype.draw = function (c) {
-  var stuff = this.getEndPointsAndCircle();
-  // draw arc
-  c.beginPath();
-  c.arc(
-    stuff.circleX,
-    stuff.circleY,
-    stuff.circleRadius,
-    stuff.startAngle,
-    stuff.endAngle,
-    false,
-  );
-  c.stroke();
-  // draw the text on the loop farthest from the node
-  var textX = stuff.circleX + stuff.circleRadius * Math.cos(this.anchorAngle);
-  var textY = stuff.circleY + stuff.circleRadius * Math.sin(this.anchorAngle);
-  drawText(
-    c,
-    this.text,
-    textX + this.labelDx,
-    textY + this.labelDy,
-    this.anchorAngle,
-    selectedObject == this,
-  );
-  // draw the head of the arrow
-  drawArrow(c, stuff.endX, stuff.endY, stuff.endAngle + Math.PI * 0.4);
-};
-
-SelfLink.prototype.containsPoint = function (x, y, extraTolerance) {
-  var stuff = this.getEndPointsAndCircle();
-  var dx = x - stuff.circleX;
-  var dy = y - stuff.circleY;
-  var distance = Math.sqrt(dx * dx + dy * dy) - stuff.circleRadius;
-  return Math.abs(distance) < hitTargetPadding + (extraTolerance || 0);
-};
-
-function StartLink(node, start) {
-  this.node = node;
-  this.deltaX = 0;
-  this.deltaY = 0;
-  this.text = "";
-  this.labelDx = 0;
-  this.labelDy = 0;
-
-  if (start) {
-    this.setAnchorPoint(start.x, start.y);
-  }
-}
-
-StartLink.prototype.setAnchorPoint = function (x, y) {
-  this.deltaX = x - this.node.x;
-  this.deltaY = y - this.node.y;
-
-  if (Math.abs(this.deltaX) < snapToPadding) {
-    this.deltaX = 0;
-  }
-
-  if (Math.abs(this.deltaY) < snapToPadding) {
-    this.deltaY = 0;
-  }
-};
-
-StartLink.prototype.getEndPoints = function () {
-  // Imported/generated start arrows may omit their anchor offset. A zero
-  // vector also makes closestPointOnCircle divide by zero, so give those
-  // arrows a visible default entry from above the state.
-  if (!isFinite(this.deltaX)) this.deltaX = 0;
-  if (!isFinite(this.deltaY)) this.deltaY = 0;
-  if (Math.sqrt(this.deltaX * this.deltaX + this.deltaY * this.deltaY) < 1e-6) {
-    this.deltaX = 0;
-    this.deltaY = -Math.max(50, nodeRadius * 2);
-  }
-  var startX = this.node.x + this.deltaX;
-  var startY = this.node.y + this.deltaY;
-  var end = this.node.closestPointOnCircle(startX, startY);
-  return {
-    startX: startX,
-    startY: startY,
-    endX: end.x,
-    endY: end.y,
-  };
-};
-
-StartLink.prototype.draw = function (c) {
-  var stuff = this.getEndPoints();
-
-  // draw the line
-  c.beginPath();
-  c.moveTo(stuff.startX, stuff.startY);
-  c.lineTo(stuff.endX, stuff.endY);
-  c.stroke();
-
-  // draw the text at the end without the arrow
-  var textAngle = Math.atan2(
-    stuff.startY - stuff.endY,
-    stuff.startX - stuff.endX,
-  );
-  drawText(
-    c,
-    this.text,
-    stuff.startX + this.labelDx,
-    stuff.startY + this.labelDy,
-    textAngle,
-    selectedObject == this,
-  );
-
-  // draw the head of the arrow
-  drawArrow(c, stuff.endX, stuff.endY, Math.atan2(-this.deltaY, -this.deltaX));
-};
-
-StartLink.prototype.containsPoint = function (x, y, extraTolerance) {
-  var stuff = this.getEndPoints();
-  var dx = stuff.endX - stuff.startX;
-  var dy = stuff.endY - stuff.startY;
-  var length = Math.sqrt(dx * dx + dy * dy);
-  var percent =
-    (dx * (x - stuff.startX) + dy * (y - stuff.startY)) / (length * length);
-  var distance = (dx * (y - stuff.startY) - dy * (x - stuff.startX)) / length;
-  return percent > 0 && percent < 1 && Math.abs(distance) < hitTargetPadding + (extraTolerance || 0);
-};
-
-function TemporaryLink(from, to) {
-  this.from = from;
-  this.to = to;
-}
-
-TemporaryLink.prototype.draw = function (c) {
-  // draw the line
-  c.beginPath();
-  c.moveTo(this.to.x, this.to.y);
-  c.lineTo(this.from.x, this.from.y);
-  c.stroke();
-
-  // draw the head of the arrow
-  drawArrow(
-    c,
-    this.to.x,
-    this.to.y,
-    Math.atan2(this.to.y - this.from.y, this.to.x - this.from.x),
-  );
-};
-
 // draw using this instead of a canvas and call toLaTeX() afterward
 function ExportAsLaTeX() {
   this._points = [];
@@ -753,8 +49,9 @@ function ExportAsLaTeX() {
   this.beginArrowClip = function (pages, margins, ppi, pageW, pageH) {
     this._texData += "\\begin{scope}\n\\clip ";
     for (var p = 0; p < pages; p++) {
+      var pm = typeof marginsAt === "function" ? marginsAt(margins, p) : (margins && margins.pages ? margins.pages[p] : margins);
       if (p) this._texData += " ";
-      this._texData += "(" + (margins.left * ppi * 0.1 + CLIP_INSET).toFixed(3) + "," + (-(p * pageH + margins.top * ppi) * 0.1 - CLIP_INSET).toFixed(3) + ") rectangle (" + ((paperPx(ppi).w - margins.right * ppi) * 0.1 - CLIP_INSET).toFixed(3) + "," + (-(p * pageH + paperPx(ppi).h - margins.bottom * ppi) * 0.1 + CLIP_INSET).toFixed(3) + ")";
+      this._texData += "(" + (pm.left * ppi * 0.1 + CLIP_INSET).toFixed(3) + "," + (-(p * pageH + pm.top * ppi) * 0.1 - CLIP_INSET).toFixed(3) + ") rectangle (" + ((paperPx(ppi).w - pm.right * ppi) * 0.1 - CLIP_INSET).toFixed(3) + "," + (-(p * pageH + paperPx(ppi).h - pm.bottom * ppi) * 0.1 + CLIP_INSET).toFixed(3) + ")";
     }
     this._texData += ";\n";
   };
@@ -893,10 +190,17 @@ function ExportAsLaTeX() {
       }
       paged += picture;
     }
-    if (!standalone) return data +
-      "% needs \\usepackage{tikz}; set the host document to the selected paper size.\n" +
-      "% If the host uses the standalone class, add the tikz option to its documentclass in the preamble.\n" +
-      "\\providecommand{\\FSMPageBreak}{\\newpage}\n" + paged;
+    if (!standalone) {
+      var headerComment =
+        "% Note on LaTeX page geometry vs. diagram clipping:\n" +
+        "% - The FSM diagram overlay clips its own states and arrows to each page's printable area using TikZ clipping.\n" +
+        "% - This snippet does NOT alter your host document's physical page geometry (\\geometry).\n" +
+        "% - To match host page text margins with each diagram page, use \\newgeometry{top=...in,bottom=...in,left=...in,right=...in} before each page.\n";
+      return data + headerComment +
+        "% needs \\usepackage{tikz}; set the host document to the selected paper size.\n" +
+        "% If the host uses the standalone class, add the tikz option to its documentclass in the preamble.\n" +
+        "\\providecommand{\\FSMPageBreak}{\\newpage}\n" + paged;
+    }
     return (
       data +
       "\\documentclass[tikz,border=0pt]{standalone}\n" +
@@ -1082,7 +386,8 @@ function ExportAsSVG() {
   this.beginArrowClip = function (pages, margins, ppi, pageW, pageH) {
     var rects = [];
     for (var p = 0; p < pages; p++) {
-      rects.push('<rect x="' + margins.left * ppi + '" y="' + (p * pageH + margins.top * ppi) + '" width="' + (pageW - (margins.left + margins.right) * ppi) + '" height="' + (pageH - (margins.top + margins.bottom) * ppi) + '"/>');
+      var pm = typeof marginsAt === "function" ? marginsAt(margins, p) : (margins && margins.pages ? margins.pages[p] : margins);
+      rects.push('<rect x="' + pm.left * ppi + '" y="' + (p * pageH + pm.top * ppi) + '" width="' + (pageW - (pm.left + pm.right) * ppi) + '" height="' + (pageH - (pm.top + pm.bottom) * ppi) + '"/>');
     }
     this._svgData += '<defs><clipPath id="fsm-arrow-pages" clipPathUnits="userSpaceOnUse">' + rects.join("") + '</clipPath></defs>\n<g clip-path="url(#fsm-arrow-pages)">\n';
   };
@@ -1132,8 +437,9 @@ function ExportAsSVG() {
     var outH = paged ? pageH : pageH * pages;
     var body = paged ? '<g transform="translate(0 ' + (-top) + ')">\n' + this._svgData + "</g>\n" : this._svgData;
     if (paged && constrainMargins) {
+      var pm = typeof marginsAt === "function" ? marginsAt(margins, pageIndex || 0) : (margins && margins.pages ? margins.pages[pageIndex || 0] : margins);
       var clipId = "fsm-printable-page";
-      var clip = '<defs><clipPath id="' + clipId + '" clipPathUnits="userSpaceOnUse"><rect x="' + margins.left * PX_PER_INCH + '" y="' + margins.top * PX_PER_INCH + '" width="' + (pageW - (margins.left + margins.right) * PX_PER_INCH) + '" height="' + (pageH - (margins.top + margins.bottom) * PX_PER_INCH) + '"/></clipPath></defs>\n';
+      var clip = '<defs><clipPath id="' + clipId + '" clipPathUnits="userSpaceOnUse"><rect x="' + pm.left * PX_PER_INCH + '" y="' + pm.top * PX_PER_INCH + '" width="' + (pageW - (pm.left + pm.right) * PX_PER_INCH) + '" height="' + (pageH - (pm.top + pm.bottom) * PX_PER_INCH) + '"/></clipPath></defs>\n';
       body = clip + '<g clip-path="url(#' + clipId + ')">\n' + body + '</g>\n';
     }
     return (
@@ -1402,10 +708,24 @@ function ExportAsTypst() {
     var pagedMode = pageMode !== false;
     var totalHeight = ph * pages;
     var paperName = pageSizeKey === "a4" ? "a4" : "us-letter";
+    var pm0 = typeof marginsAt === "function" ? marginsAt(margins, 0) : (margins && margins.pages ? margins.pages[0] : margins);
     var pageSetup = pagedMode
-      ? "#set page(paper: \"" + paperName + "\", margin: (top: " + margins.top + "in, bottom: " + margins.bottom + "in, left: " + margins.left + "in, right: " + margins.right + "in))\n"
+      ? "#set page(paper: \"" + paperName + "\", margin: (top: " + pm0.top + "in, bottom: " + pm0.bottom + "in, left: " + pm0.left + "in, right: " + pm0.right + "in))\n"
       : "#set page(width: " + pw.toFixed(4) + "in, height: " + totalHeight.toFixed(4) + "in, margin: 0pt)\n";
-    out += standalone ? pageSetup : "// Host document page setup: " + pageSetup.replace(/\n/g, " ") + "\n";
+    if (standalone) {
+      out += pageSetup;
+    } else {
+      out += "// Host document page setup: " + pageSetup.replace(/\n/g, " ") + "\n";
+      out += "// Note on Typst page geometry vs. diagram clipping:\n";
+      out += "// - In standalone export, #set page(margin: ...) enforces physical document geometry per page.\n";
+      out += "// - In this embedded snippet, inner clipping boxes constrain the diagram to printable areas but do not alter your host document's page geometry.\n";
+      if (margins && margins.pages && margins.pages.length > 1) {
+        for (var pi = 0; pi < pages; pi++) {
+          var pmi = typeof marginsAt === "function" ? marginsAt(margins, pi) : margins.pages[pi];
+          out += "// Page " + (pi + 1) + " margins: top " + pmi.top + "in, bottom " + pmi.bottom + "in, left " + pmi.left + "in, right " + pmi.right + "in\n";
+        }
+      }
+    }
     if (!pagedMode) {
       out += "#place(top + left)[\n  #box(width: " + pw.toFixed(4) + "in, height: " + totalHeight.toFixed(4) + "in, clip: true)[\n";
       out += "    #cetz.canvas({\n      import cetz.draw: *\n";
@@ -1414,8 +734,14 @@ function ExportAsTypst() {
       return out + "    })\n  ]\n]\n";
     }
     for (var p = 0; p < pages; p++) {
-      if (p) out += "#pagebreak()\n";
-      out += "#place(top + left, dx: -" + margins.left + "in, dy: -" + margins.top + "in)[\n";
+      var pm = typeof marginsAt === "function" ? marginsAt(margins, p) : (margins && margins.pages ? margins.pages[p] : margins);
+      if (p) {
+        out += "#pagebreak()\n";
+        if (standalone && margins && margins.pages && margins.pages.length > 1) {
+          out += "#set page(margin: (top: " + pm.top + "in, bottom: " + pm.bottom + "in, left: " + pm.left + "in, right: " + pm.right + "in))\n";
+        }
+      }
+      out += "#place(top + left, dx: -" + pm.left + "in, dy: -" + pm.top + "in)[\n";
       out += "  #box(width: " + pw.toFixed(4) + "in, height: " + ph.toFixed(4) + "in, clip: true)[\n";
       function canvasCode(data) {
         return "#cetz.canvas({\n        import cetz.draw: *\n" +
@@ -1424,12 +750,12 @@ function ExportAsTypst() {
       }
       var nodePageData = this._nodePages[p] || "";
       if (constrainMargins) {
-        var innerW = pw - margins.left - margins.right;
-        var innerH = ph - margins.top - margins.bottom;
-        out += "    #place(top + left, dx: " + margins.left + "in, dy: " + margins.top + "in)[\n";
+        var innerW = pw - pm.left - pm.right;
+        var innerH = ph - pm.top - pm.bottom;
+        out += "    #place(top + left, dx: " + pm.left + "in, dy: " + pm.top + "in)[\n";
         out += "      #box(width: " + innerW.toFixed(4) + "in, height: " + innerH.toFixed(4) + "in, clip: true)[\n";
-        if (nodePageData) out += "        #place(top + left, dx: -" + margins.left + "in, dy: -" + (p * ph + margins.top) + "in)[" + canvasCode(nodePageData) + "]\n";
-        if (this._arrowData) out += "        #place(top + left, dx: -" + margins.left + "in, dy: -" + (p * ph + margins.top) + "in)[" + canvasCode(this._arrowData) + "]\n";
+        if (nodePageData) out += "        #place(top + left, dx: -" + pm.left + "in, dy: -" + (p * ph + pm.top) + "in)[" + canvasCode(nodePageData) + "]\n";
+        if (this._arrowData) out += "        #place(top + left, dx: -" + pm.left + "in, dy: -" + (p * ph + pm.top) + "in)[" + canvasCode(this._arrowData) + "]\n";
         out += "      ]\n    ]\n";
       } else {
         out += "    #place(top + left, dy: -" + (p * ph) + "in)[" + canvasCode(nodePageData + this._data + this._arrowData) + "]\n";
@@ -2037,16 +1363,8 @@ function automataCreateWorkspace(name, generated, alphabet) {
     return an.localeCompare(bn) || a - b;
   });
 
-  var marginLeft = pageMargins.left * PX_PER_INCH;
-  var marginRight = pageMargins.right * PX_PER_INCH;
-  var marginTop = pageMargins.top * PX_PER_INCH;
-  var marginBottom = pageMargins.bottom * PX_PER_INCH;
   var safeX = Math.max(radius + 20, styleStateFontSize * 3.2);
   var safeY = radius + 20;
-  var minX = marginLeft + safeX, maxX = width - marginRight - safeX;
-  var minY = marginTop + safeY, maxY = height - marginBottom - safeY;
-  if (maxX < minX) minX = maxX = width / 2;
-  if (maxY < minY) minY = maxY = height / 2;
   var orderRank = new Array(count);
   stateOrder.forEach(function (state, rank) { orderRank[state] = rank; });
   function displayGeneratedStateName(name, index) {
@@ -2061,8 +1379,23 @@ function automataCreateWorkspace(name, generated, alphabet) {
     var row = Math.floor(cell / columns);
     var col = cell % columns;
     if (row % 2) col = columns - 1 - col;
+
+    var pm = typeof marginsForPage === "function" ? marginsForPage(page, generatedPages) : pageMargins;
+    var marginLeft = pm.left * PX_PER_INCH;
+    var marginRight = pm.right * PX_PER_INCH;
+    var marginTop = pm.top * PX_PER_INCH;
+    var marginBottom = pm.bottom * PX_PER_INCH;
+    var minX = marginLeft + safeX, maxX = width - marginRight - safeX;
+    var minY = marginTop + safeY, maxY = height - marginBottom - safeY;
+    if (maxX < minX) minX = maxX = width / 2;
+    if (maxY < minY) minY = maxY = height / 2;
+
+    var nodesOnPage = Math.min(count - page * perPage, perPage);
+    var actualRows = Math.ceil(nodesOnPage / columns);
     var x = minX + (columns === 1 ? 0 : (maxX - minX) * col / (columns - 1));
-    var y = page * height + minY + (rows === 1 ? 0 : (maxY - minY) * row / (rows - 1));
+    var y = page * height + (actualRows <= 1
+      ? (minY + maxY) / 2
+      : minY + (maxY - minY) * row / (actualRows - 1));
     return { text: displayGeneratedStateName(node.name, i), isAcceptState: !!node.accepting,
       x: x, y: y };
   });
@@ -2177,8 +1510,16 @@ function automataCreateWorkspace(name, generated, alphabet) {
     localStorage.setItem("fsm-automata-alphabet-" + newId, generatedAlphabet.join(", "));
   } catch (e) {}
   Workspace.switchTo(newId);
-  var data = { nodes: generatedNodes, links: generatedLinks, style: getStyle(), pages: generatedPages,
-    pageSize: pageSizeKey, margins: pageMarginsForExport(), constrainToMargins: constrainToMargins };
+  var data = {
+    nodes: generatedNodes,
+    links: generatedLinks,
+    style: getStyle(),
+    pages: generatedPages,
+    pageSize: pageSizeKey,
+    margins: typeof pageBaseMarginsForSave === "function" ? pageBaseMarginsForSave() : pageMarginsForExport(),
+    marginSettings: typeof pageMarginSettingsForSave === "function" ? pageMarginSettingsForSave() : null,
+    constrainToMargins: constrainToMargins
+  };
   Workspace.saveActive(data); deserializeState(data);
   History.reset(snapshotJSON()); draw();
   var typeSelect = document.getElementById("automata-type"), alphabetInput = document.getElementById("automata-alphabet");
@@ -2959,14 +2300,20 @@ function drawText(c, originalText, x, y, angleOrNull, isSelected) {
   if (angleOrNull != null && constrainToMargins && typeof pageHeightPx === "function") {
     var halfLabelWidth = width / 2 + 3;
     var halfLabelHeight = Math.max(fontSize / 2, lines.length * fontSize * 0.575) + 3;
-    var printableLeft = pageMargins.left * PX_PER_INCH;
-    var printableRight = pageWidthPx() - pageMargins.right * PX_PER_INCH;
+    var firstPageMargins = marginsForPage(0);
+    var printableLeft = firstPageMargins.left * PX_PER_INCH;
+    var printableRight = pageWidthPx() - firstPageMargins.right * PX_PER_INCH;
     var printableWidth = Math.max(0, printableRight - printableLeft);
     var clampedHalfWidth = Math.min(halfLabelWidth, printableWidth / 2);
     var bestLabel = null;
     for (var page = 0; page < pageCount; page++) {
-      var top = page * pageHeightPx() + pageMargins.top * PX_PER_INCH;
-      var bottom = (page + 1) * pageHeightPx() - pageMargins.bottom * PX_PER_INCH;
+      var pageMarginsHere = marginsForPage(page);            // each page can have its own margins
+      printableLeft = pageMarginsHere.left * PX_PER_INCH;
+      printableRight = pageWidthPx() - pageMarginsHere.right * PX_PER_INCH;
+      printableWidth = Math.max(0, printableRight - printableLeft);
+      clampedHalfWidth = Math.min(halfLabelWidth, printableWidth / 2);
+      var top = page * pageHeightPx() + pageMarginsHere.top * PX_PER_INCH;
+      var bottom = (page + 1) * pageHeightPx() - pageMarginsHere.bottom * PX_PER_INCH;
       var availableHeight = Math.max(0, bottom - top);
       var clampedHalfHeight = Math.min(halfLabelHeight, availableHeight / 2);
       var minX = printableLeft + clampedHalfWidth;
@@ -3056,9 +2403,10 @@ function drawUsing(c, colors, ignoreMarginClip, preserveCanvas) {
   if (!ignoreMarginClip && constrainToMargins && typeof c.rect === "function" && typeof c.clip === "function") {
     c.beginPath();
     for (var p = 0; p < pageCount; p++) {
-      c.rect(pageMargins.left * PX_PER_INCH, p * pageHeightPx() + pageMargins.top * PX_PER_INCH,
-        pageWidthPx() - (pageMargins.left + pageMargins.right) * PX_PER_INCH,
-        pageHeightPx() - (pageMargins.top + pageMargins.bottom) * PX_PER_INCH);
+      var pgClip = marginsForPage(p);
+      c.rect(pgClip.left * PX_PER_INCH, p * pageHeightPx() + pgClip.top * PX_PER_INCH,
+        pageWidthPx() - (pgClip.left + pgClip.right) * PX_PER_INCH,
+        pageHeightPx() - (pgClip.top + pgClip.bottom) * PX_PER_INCH);
     }
     c.clip();
   }
@@ -3073,17 +2421,17 @@ function drawUsing(c, colors, ignoreMarginClip, preserveCanvas) {
   }
   if (constrainToMargins) {
     var ph = pageHeightPx();
-    var topInset = pageMargins.top * PX_PER_INCH;
-    var bottomInset = pageMargins.bottom * PX_PER_INCH;
-    var seamGap = (pageMargins.top + pageMargins.bottom) * PX_PER_INCH;
     for (var page = 0; page < pageCount; page++) {
+      var pgMargins = marginsForPage(page);
+      var topInset = pgMargins.top * PX_PER_INCH;
+      var bottomInset = pgMargins.bottom * PX_PER_INCH;
       if (typeof c.beginNodeClip === "function") {
-        c.beginNodeClip(page, pageMargins, PX_PER_INCH, pageWidthPx(), ph);
+        c.beginNodeClip(page, pgMargins, PX_PER_INCH, pageWidthPx(), ph);
       } else if (typeof c.rect === "function" && typeof c.clip === "function") {
         c.save();
         c.beginPath();
-        c.rect(pageMargins.left * PX_PER_INCH, page * ph + topInset,
-          pageWidthPx() - (pageMargins.left + pageMargins.right) * PX_PER_INCH,
+        c.rect(pgMargins.left * PX_PER_INCH, page * ph + topInset,
+          pageWidthPx() - (pgMargins.left + pgMargins.right) * PX_PER_INCH,
           ph - topInset - bottomInset);
         c.clip();
       }
@@ -3092,12 +2440,14 @@ function drawUsing(c, colors, ignoreMarginClip, preserveCanvas) {
         var reach = Math.max(nodeRadius, styleStateFontSize * 0.75) + 2;
         drawNode(node, 0); // the state’s ordinary position on this page
         if (page > 0) {
-          var priorBottom = page * ph - bottomInset;
-          if (Math.abs(node.y - priorBottom) <= reach) drawNode(node, seamGap);
+          var prevMargins = marginsForPage(page - 1);
+          var priorBottom = page * ph - prevMargins.bottom * PX_PER_INCH;
+          if (Math.abs(node.y - priorBottom) <= reach) drawNode(node, (prevMargins.bottom + pgMargins.top) * PX_PER_INCH);
         }
         if (page + 1 < pageCount) {
-          var nextTop = (page + 1) * ph + topInset;
-          if (Math.abs(node.y - nextTop) <= reach) drawNode(node, -seamGap);
+          var nextMargins = marginsForPage(page + 1);
+          var nextTop = (page + 1) * ph + nextMargins.top * PX_PER_INCH;
+          if (Math.abs(node.y - nextTop) <= reach) drawNode(node, -(pgMargins.bottom + nextMargins.top) * PX_PER_INCH);
         }
       }
       if (typeof c.endNodeClip === "function") c.endNodeClip();
@@ -3108,7 +2458,7 @@ function drawUsing(c, colors, ignoreMarginClip, preserveCanvas) {
   }
   var arrowClip = false;
   if (constrainToMargins && !ignoreMarginClip && typeof c.beginArrowClip === "function") {
-    c.beginArrowClip(pageCount, pageMargins, PX_PER_INCH, pageWidthPx(), pageHeightPx());
+    c.beginArrowClip(pageCount, pageMarginsForExport(), PX_PER_INCH, pageWidthPx(), pageHeightPx());
     arrowClip = true;
   }
   for (var i = 0; i < links.length; i++) {
@@ -4611,6 +3961,126 @@ function pageHeightPx() {
   return Math.round(PAGE_SIZES[pageSizeKey].h * PX_PER_INCH);
 }
 
+// ---- per-page margins ------------------------------------------------------------------------
+// "all":     every page uses pageMargins (the preset or the custom values) - the original behaviour.
+// "edges":   like "all", but the FIRST page's top and the LAST page's bottom can be set separately,
+//            to leave room for text before and after the diagram. With one page both apply to it.
+// "perPage": every page has its own four margins; pages without an entry use pageMargins.
+var MARGIN_MODES = ["all", "edges", "perPage"];
+var pageMarginMode = "all";
+var pageMarginEdges = { firstTop: null, lastBottom: null };   // inches, or null = use pageMargins
+var pageMarginPages = [];                                      // pageMarginPages[p] = {top,bottom,left,right} or null
+
+function clampMarginInches(value, fallback) {
+  var v = Number(value);
+  return value != null && value !== "" && isFinite(v) ? Math.max(0, Math.min(4, v)) : fallback;
+}
+
+function marginsForPage(p, totalPages) {
+  var count = typeof totalPages === "number" && totalPages > 0 ? totalPages : pageCount;
+  var last = Math.max(1, count) - 1;
+  p = Math.max(0, Math.min(last, Math.round(Number(p)) || 0));
+  var m = { top: pageMargins.top, bottom: pageMargins.bottom, left: pageMargins.left, right: pageMargins.right };
+  if (pageMarginMode === "edges") {
+    if (p === 0 && pageMarginEdges.firstTop != null) m.top = pageMarginEdges.firstTop;
+    if (p === last && pageMarginEdges.lastBottom != null) m.bottom = pageMarginEdges.lastBottom;
+  } else if (pageMarginMode === "perPage") {
+    var own = pageMarginPages[p];
+    if (own) { m.top = own.top; m.bottom = own.bottom; m.left = own.left; m.right = own.right; }
+  }
+  return m;
+}
+
+function allPageMargins(totalPages) {
+  var count = typeof totalPages === "number" && totalPages > 0 ? totalPages : pageCount;
+  var out = [];
+  for (var p = 0; p < count; p++) out.push(marginsForPage(p, count));
+  return out;
+}
+
+// Exporters accept either one margins object or an object carrying a per-page list in .pages.
+function marginsAt(margins, p) {
+  if (margins && margins.pages && margins.pages.length) {
+    return margins.pages[Math.max(0, Math.min(margins.pages.length - 1, Math.round(Number(p)) || 0))];
+  }
+  return margins;
+}
+
+function pageIndexForY(y) {
+  return Math.max(0, Math.min(Math.max(1, pageCount) - 1, Math.floor(y / pageHeightPx())));
+}
+
+function afterMarginChange(redraw) {
+  if (constrainToMargins && typeof nodes !== "undefined") nodes.forEach(function (node) { constrainNodeToMargins(node); });
+  __pagesLast = "";
+  syncPagesUI();
+  if (redraw && typeof draw === "function") draw();
+}
+
+function setPageMarginMode(mode, redraw) {
+  pageMarginMode = MARGIN_MODES.indexOf(mode) >= 0 ? mode : "all";
+  afterMarginChange(redraw);
+}
+
+function setPageMarginEdges(edges, redraw) {
+  edges = edges || {};
+  pageMarginEdges = {
+    firstTop: edges.firstTop == null || edges.firstTop === "" ? null : clampMarginInches(edges.firstTop, null),
+    lastBottom: edges.lastBottom == null || edges.lastBottom === "" ? null : clampMarginInches(edges.lastBottom, null),
+  };
+  afterMarginChange(redraw);
+}
+
+// margins == null puts that page back on the base margins.
+function setPageMarginPage(p, margins, redraw) {
+  p = Math.max(0, Math.min(MAX_PAGES - 1, Math.round(Number(p)) || 0));
+  if (margins == null) {
+    pageMarginPages[p] = null;
+  } else {
+    pageMarginPages[p] = {
+      top: clampMarginInches(margins.top, pageMargins.top),
+      bottom: clampMarginInches(margins.bottom, pageMargins.bottom),
+      left: clampMarginInches(margins.left, pageMargins.left),
+      right: clampMarginInches(margins.right, pageMargins.right),
+    };
+  }
+  afterMarginChange(redraw);
+}
+
+// Choosing a preset means "use this everywhere", so it clears every override.
+function clearPageMarginOverrides() {
+  pageMarginEdges = { firstTop: null, lastBottom: null };
+  pageMarginPages = [];
+}
+
+function pageMarginSettingsForSave() {
+  return {
+    mode: pageMarginMode,
+    edges: { firstTop: pageMarginEdges.firstTop, lastBottom: pageMarginEdges.lastBottom },
+    pages: pageMarginPages.map(function (m) { return m ? { top: m.top, bottom: m.bottom, left: m.left, right: m.right } : null; }),
+  };
+}
+
+// Tolerant on purpose: files saved before this feature simply have none of these fields.
+function restorePageMarginSettings(data) {
+  data = data || {};
+  pageMarginMode = MARGIN_MODES.indexOf(data.mode) >= 0 ? data.mode : "all";
+  var e = data.edges || {};
+  pageMarginEdges = {
+    firstTop: e.firstTop == null ? null : clampMarginInches(e.firstTop, null),
+    lastBottom: e.lastBottom == null ? null : clampMarginInches(e.lastBottom, null),
+  };
+  pageMarginPages = [];
+  (Array.isArray(data.pages) ? data.pages : []).slice(0, MAX_PAGES).forEach(function (m, i) {
+    pageMarginPages[i] = m && typeof m === "object" ? {
+      top: clampMarginInches(m.top, pageMargins.top),
+      bottom: clampMarginInches(m.bottom, pageMargins.bottom),
+      left: clampMarginInches(m.left, pageMargins.left),
+      right: clampMarginInches(m.right, pageMargins.right),
+    } : null;
+  });
+}
+
 function setPageMargins(margins, redraw) {
   var next = margins || {};
   var preset = inferMarginPreset(next, pageSizeKey);
@@ -4638,7 +4108,18 @@ function setPageSize(key, redraw) {
   if (redraw && typeof draw === "function") draw();
 }
 
+// The plain fields are what single-flow exports use (top of the first page, bottom of the last page,
+// left/right of the first page); .pages carries one margins object per page for paged exports.
+// In "all" mode these equal the base margins, as before.
 function pageMarginsForExport() {
+  var first = marginsForPage(0), last = marginsForPage(pageCount - 1);
+  return { preset: pageMargins.preset, mode: pageMarginMode,
+           top: first.top, bottom: last.bottom, left: first.left, right: first.right,
+           pages: allPageMargins() };
+}
+
+// The base margins only (what the preset / custom fields hold), for saving.
+function pageBaseMarginsForSave() {
   return { preset: pageMargins.preset, top: pageMargins.top, bottom: pageMargins.bottom, left: pageMargins.left, right: pageMargins.right };
 }
 
@@ -4672,17 +4153,19 @@ function clampToPrintable(x, y, insetX, insetY) {
   var w = pageWidthPx(), h = pageHeightPx();
   var p = 0, bestDistance = Infinity, bestY = y;
   for (var candidate = 0; candidate < pageCount; candidate++) {
-    var candidateMin = candidate * h + pageMargins.top * PX_PER_INCH + insetY;
-    var candidateMax = (candidate + 1) * h - pageMargins.bottom * PX_PER_INCH - insetY;
+    var cm = marginsForPage(candidate);
+    var candidateMin = candidate * h + cm.top * PX_PER_INCH + insetY;
+    var candidateMax = (candidate + 1) * h - cm.bottom * PX_PER_INCH - insetY;
     if (candidateMax < candidateMin) candidateMin = candidateMax = candidate * h + h / 2;
     var candidateY = Math.max(candidateMin, Math.min(candidateMax, y));
     var distance = Math.abs(candidateY - y);
     if (distance < bestDistance) { bestDistance = distance; p = candidate; bestY = candidateY; }
   }
-  var minX = pageMargins.left * PX_PER_INCH + insetX;
-  var maxX = w - pageMargins.right * PX_PER_INCH - insetX;
-  var minY = p * h + pageMargins.top * PX_PER_INCH + insetY;
-  var maxY = (p + 1) * h - pageMargins.bottom * PX_PER_INCH - insetY;
+  var pm = marginsForPage(p);
+  var minX = pm.left * PX_PER_INCH + insetX;
+  var maxX = w - pm.right * PX_PER_INCH - insetX;
+  var minY = p * h + pm.top * PX_PER_INCH + insetY;
+  var maxY = (p + 1) * h - pm.bottom * PX_PER_INCH - insetY;
   if (maxX < minX) minX = maxX = w / 2;
   if (maxY < minY) minY = maxY = p * h + h / 2;
   return { x: Math.max(minX, Math.min(maxX, x)), y: bestY, page: p };
@@ -4697,13 +4180,14 @@ function constrainNodeToMargins(node) {
   }
   var insetX = Math.max(nodeRadius, textWidth / 2) + 2;
   var insetY = Math.max(nodeRadius, styleStateFontSize * 0.75) + 2;
-  var minX = pageMargins.left * PX_PER_INCH + insetX;
-  var maxX = w - pageMargins.right * PX_PER_INCH - insetX;
+  var pm = marginsForPage(pageIndexForY(node.y));       // left/right come from the page the state sits on
+  var minX = pm.left * PX_PER_INCH + insetX;
+  var maxX = w - pm.right * PX_PER_INCH - insetX;
   if (maxX < minX) minX = maxX = w / 2;
   node.x = Math.max(minX, Math.min(maxX, node.x));
   // Keep the first page's top boundary, but let states cross every lower
   // page seam. Rendering projects the crossing fragment into the next page.
-  node.y = Math.max(pageMargins.top * PX_PER_INCH + insetY, node.y);
+  node.y = Math.max(marginsForPage(0).top * PX_PER_INCH + insetY, node.y);
 }
 
 function clampNodePosition(x, y) {
@@ -4742,10 +4226,6 @@ function drawPageGuides(c) {
   var fg = getDrawColors().fg;
   var w = pageWidthPx();
   var h = pageHeightPx();
-  var mt = pageMargins.top * PX_PER_INCH;
-  var mb = pageMargins.bottom * PX_PER_INCH;
-  var ml = pageMargins.left * PX_PER_INCH;
-  var mr = pageMargins.right * PX_PER_INCH;
   c.save();
   if (c.canvas === canvas && typeof c.scale === "function") c.scale(editorPixelRatio(), editorPixelRatio());
   c.globalCompositeOperation = "destination-over";
@@ -4754,6 +4234,8 @@ function drawPageGuides(c) {
   c.lineWidth = 1;
   for (var p = 0; p < pageCount; p++) {
     var top = p * h;
+    var pm = marginsForPage(p);
+    var mt = pm.top * PX_PER_INCH, mb = pm.bottom * PX_PER_INCH, ml = pm.left * PX_PER_INCH, mr = pm.right * PX_PER_INCH;
     c.globalAlpha = 0.35;
     c.setLineDash([]);
     c.strokeRect(0.5, top + 0.5, w - 1, h - 1);
@@ -4797,7 +4279,7 @@ function syncPagesUI() {
   info.textContent =
     pageCount + (pageCount === 1 ? " page" : " pages") + " \u00b7 " + size.label + " " +
     size.w.toFixed(2) + "\u00d7" + size.h.toFixed(2) + " in \u00b7 " + PAGE_MARGIN_PRESETS[pageMargins.preset].label +
-    " margins (T " + pageMargins.top + ' in, B ' + pageMargins.bottom + ' in, L ' + pageMargins.left + ' in, R ' + pageMargins.right + " in)";
+    " margins (T " + pageMargins.top + ' in, B ' + pageMargins.bottom + ' in, L ' + pageMargins.left + ' in, R ' + pageMargins.right + " in)" + marginModeSummary();
   remove.disabled = !canRemove;
   remove.title = canRemove || pageCount === 1 ? "" : "Move everything off the last page first";
   add.disabled = pageCount >= MAX_PAGES;
@@ -4809,6 +4291,153 @@ function syncPagesUI() {
     var input = document.getElementById("page-margin-" + side);
     if (input && document.activeElement !== input) input.value = pageMargins[side];
   });
+  syncMarginModeUI();
+}
+
+// ---- margin-mode controls (they sit under the margin inputs) ---------------------------------
+var __marginUi = null;
+
+function marginModeSummary() {
+  if (pageMarginMode === "edges") {
+    return " \u00b7 first page top " + marginsForPage(0).top + " in, last page bottom " + marginsForPage(pageCount - 1).bottom + " in";
+  }
+  if (pageMarginMode === "perPage") return " \u00b7 custom margins per page";
+  return "";
+}
+
+function marginField(id, text, title) {
+  var wrap = document.createElement("label");
+  wrap.style.cssText = "display:inline-flex;align-items:center;gap:4px";
+  wrap.title = title || "";
+  var span = document.createElement("span");
+  span.textContent = text;
+  var input = document.createElement("input");
+  input.type = "number"; input.min = "0"; input.max = "4"; input.step = "0.05"; input.id = id;
+  input.style.width = "64px";
+  wrap.appendChild(span);
+  wrap.appendChild(input);
+  return { wrap: wrap, input: input };
+}
+
+function buildPerPageRows(ui) {
+  ui.perPage.textContent = "";
+  ui.rows = [];
+  for (var p = 0; p < pageCount; p++) (function (p) {
+    var line = document.createElement("div");
+    line.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap";
+    var name = document.createElement("strong");
+    name.textContent = "Page " + (p + 1);
+    name.style.minWidth = "52px";
+    line.appendChild(name);
+    var fields = {};
+    [["top", "Top"], ["bottom", "Bottom"], ["left", "Left"], ["right", "Right"]].forEach(function (s) {
+      var f = marginField("page-margin-" + p + "-" + s[0], s[1], "Margin on this page only, in inches");
+      fields[s[0]] = f.input;
+      line.appendChild(f.wrap);
+      f.input.addEventListener("change", function () {
+        flushHistory();
+        setPageMarginPage(p, { top: fields.top.value, bottom: fields.bottom.value, left: fields.left.value, right: fields.right.value }, true);
+        commitHistory();
+      });
+    });
+    var reset = document.createElement("button");
+    reset.type = "button";
+    reset.textContent = "Reset";
+    reset.title = "Put this page back on the margins above";
+    reset.addEventListener("click", function () { flushHistory(); setPageMarginPage(p, null, true); commitHistory(); });
+    line.appendChild(reset);
+    ui.perPage.appendChild(line);
+    ui.rows[p] = { fields: fields, reset: reset };
+  })(p);
+}
+
+function syncMarginModeUI() {
+  var ui = __marginUi;
+  if (!ui) return;
+  ui.select.value = pageMarginMode;
+  var hints = {
+    all: "The margins above apply to every page.",
+    edges: "The margins above apply to every page. The two boxes below override the first page's top and the last page's bottom, to leave room for text before and after the diagram. A one-page diagram uses both.",
+    perPage: "Edit each page's margins. Pages you do not edit follow the margins above.",
+  };
+  ui.hint.textContent = hints[pageMarginMode] || "";
+  ui.edges.style.display = pageMarginMode === "edges" ? "flex" : "none";
+  ui.perPage.style.display = pageMarginMode === "perPage" ? "flex" : "none";
+  var active = document.activeElement;
+  if (pageMarginMode === "edges") {
+    [[ui.first.input, pageMarginEdges.firstTop, pageMargins.top], [ui.last.input, pageMarginEdges.lastBottom, pageMargins.bottom]].forEach(function (f) {
+      f[0].placeholder = String(f[2]);
+      if (active !== f[0]) f[0].value = f[1] == null ? "" : String(f[1]);
+    });
+  }
+  if (pageMarginMode === "perPage") {
+    if (ui.rows.length !== pageCount) buildPerPageRows(ui);
+    for (var p = 0; p < pageCount; p++) {
+      var m = marginsForPage(p), row = ui.rows[p];
+      ["top", "bottom", "left", "right"].forEach(function (side) {
+        if (active !== row.fields[side]) row.fields[side].value = String(m[side]);
+      });
+      row.reset.disabled = !pageMarginPages[p];
+    }
+  }
+}
+
+function wirePageMarginModes(anchor) {
+  if (!anchor || !anchor.parentNode || document.getElementById("page-margin-modes")) return;
+  var row = document.createElement("div");
+  row.id = "page-margin-modes";
+  row.style.cssText = "margin:6px 0;font-size:12px;display:flex;flex-direction:column;gap:6px";
+
+  var head = document.createElement("div");
+  head.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap";
+  var label = document.createElement("label");
+  label.textContent = "Margin mode";
+  label.htmlFor = "page-margin-mode";
+  var select = document.createElement("select");
+  select.id = "page-margin-mode";
+  [["all", "Same on every page"], ["edges", "Same, with first-page top / last-page bottom"], ["perPage", "Custom per page"]].forEach(function (o) {
+    var opt = document.createElement("option");
+    opt.value = o[0];
+    opt.textContent = o[1];
+    select.appendChild(opt);
+  });
+  head.appendChild(label);
+  head.appendChild(select);
+
+  var hint = document.createElement("div");
+  hint.style.opacity = "0.75";
+
+  var edges = document.createElement("div");
+  edges.style.cssText = "display:none;align-items:center;gap:12px;flex-wrap:wrap";
+  var first = marginField("page-margin-first-top", "First page top (in)", "Top margin of the first page only. Leave empty to use the top margin above.");
+  var last = marginField("page-margin-last-bottom", "Last page bottom (in)", "Bottom margin of the last page only. Leave empty to use the bottom margin above.");
+  edges.appendChild(first.wrap);
+  edges.appendChild(last.wrap);
+
+  var perPage = document.createElement("div");
+  perPage.id = "page-margin-per-page";
+  perPage.style.cssText = "display:none;flex-direction:column;gap:4px";
+
+  row.appendChild(head);
+  row.appendChild(hint);
+  row.appendChild(edges);
+  row.appendChild(perPage);
+  anchor.parentNode.insertBefore(row, anchor.nextSibling);
+  __marginUi = { row: row, select: select, hint: hint, edges: edges, first: first, last: last, perPage: perPage, rows: [] };
+
+  select.addEventListener("change", function () {
+    flushHistory();
+    setPageMarginMode(select.value, true);
+    commitHistory();
+  });
+  function commitEdges() {
+    flushHistory();
+    setPageMarginEdges({ firstTop: first.input.value, lastBottom: last.input.value }, true);
+    commitHistory();
+  }
+  first.input.addEventListener("change", commitEdges);
+  last.input.addEventListener("change", commitEdges);
+  syncMarginModeUI();
 }
 
 function wirePagesUI() {
@@ -4882,6 +4511,7 @@ function wirePagesUI() {
   });
   preset.addEventListener("change", function () {
     var p = marginPresetValues(preset.value);
+    clearPageMarginOverrides();
     setPageMargins({ preset: preset.value, top: p.top, bottom: p.bottom, left: p.left, right: p.right }, true);
     ["top", "bottom", "left", "right"].forEach(function (s) { customInputs[s].value = pageMargins[s]; });
     commitHistory();
@@ -4890,7 +4520,8 @@ function wirePagesUI() {
   canvas.parentNode.insertBefore(row, canvas.nextSibling); // directly under the diagram
   canvas.parentNode.insertBefore(settings, row.nextSibling);
   setPageCount(pageCount); // size the canvas even when nothing was loaded
-  wireTypstHelp(settings);
+  wirePageMarginModes(settings);
+  wireTypstHelp(document.getElementById("page-margin-modes") || settings);
 }
 
 function wireTypstHelp(anchor) {
@@ -4928,7 +4559,16 @@ function wireTypstHelp(anchor) {
 // Reads/writes the active FSM via Workspace.
 
 function serializeState() {
-  var data = { nodes: [], links: [], style: getStyle(), pages: pageCount, pageSize: pageSizeKey, margins: pageMarginsForExport(), constrainToMargins: constrainToMargins };
+  var data = {
+    nodes: [],
+    links: [],
+    style: getStyle(),
+    pages: pageCount,
+    pageSize: pageSizeKey,
+    margins: typeof pageBaseMarginsForSave === "function" ? pageBaseMarginsForSave() : pageMarginsForExport(),
+    marginSettings: typeof pageMarginSettingsForSave === "function" ? pageMarginSettingsForSave() : null,
+    constrainToMargins: constrainToMargins
+  };
   for (var i = 0; i < nodes.length; i++) {
     var node = nodes[i];
     data.nodes.push({
@@ -4988,7 +4628,11 @@ function deserializeState(data) {
   setPageSize(data.pageSize || "letter", false);
   setPageCount(data.pages || 1);
   setPageMargins(data.margins || PAGE_MARGIN_PRESETS.apa, false);
+  if (typeof restorePageMarginSettings === "function") {
+    restorePageMarginSettings(data.marginSettings || (data.margins && data.margins.mode ? data.margins : {}));
+  }
   setConstrainToMargins(data.constrainToMargins !== false, false);
+  if (typeof syncPagesUI === "function") syncPagesUI();
   if (typeof syncStyleInputs === "function") syncStyleInputs();
   for (var i = 0; i < data.nodes.length; i++) {
     var bn = data.nodes[i];
@@ -5793,3 +5437,707 @@ var Workspace = (function () {
     },
   };
 })();
+
+function Link(a, b) {
+  this.nodeA = a;
+  this.nodeB = b;
+  this.text = "";
+  this.lineAngleAdjust = 0; // value to add to textAngle when link is straight line
+  this.labelDx = 0; // manual label offset (Alt+drag)
+  this.labelDy = 0;
+
+  // make anchor point relative to the locations of nodeA and nodeB
+  this.parallelPart = 0.5; // percentage from nodeA to nodeB
+  this.perpendicularPart = 0; // pixels from line between nodeA and nodeB
+  this.curvePoints = null; // three route handles for the whole link
+}
+
+Link.prototype._curvePageBreaks = function (start, end) {
+  var ph = typeof pageHeightPx === "function" ? pageHeightPx() : 1056;
+  var lo = Math.min(start.y, end.y), hi = Math.max(start.y, end.y);
+  var breaks = [0, 1];
+  if (Math.abs(end.y - start.y) > 1e-6) {
+    for (var y = (Math.floor(lo / ph) + 1) * ph; y < hi - 1e-6; y += ph) {
+      var t = (y - start.y) / (end.y - start.y);
+      if (t > 1e-6 && t < 1 - 1e-6) breaks.push(t);
+    }
+  }
+  breaks.sort(function (a, b) { return a - b; });
+  return breaks;
+};
+
+Link.prototype._linkCenters = function () {
+  var ph = pageHeightPx(), gap = (pageMargins.top + pageMargins.bottom) * PX_PER_INCH;
+  var reach = Math.max(nodeRadius, styleStateFontSize * 0.75) + 2;
+  function candidates(node) {
+    var out = [{ x: node.x, y: node.y }];
+    for (var p = 0; p + 1 < pageCount; p++) {
+      var nextTop = (p + 1) * ph + pageMargins.top * PX_PER_INCH;
+      var priorBottom = (p + 1) * ph - pageMargins.bottom * PX_PER_INCH;
+      if (Math.abs(node.y - nextTop) <= reach) out.push({ x: node.x, y: node.y - gap });
+      if (Math.abs(node.y - priorBottom) <= reach) out.push({ x: node.x, y: node.y + gap });
+    }
+    return out;
+  }
+  function choose(node, highY) {
+    var list = candidates(node), best = list[0];
+    for (var i = 1; i < list.length; i++) {
+      if (highY ? list[i].y > best.y : list[i].y < best.y) best = list[i];
+    }
+    return best;
+  }
+  // When either state straddles a page seam, route from the fragment on the
+  // source side toward the fragment on the destination side. This lets the
+  // curve continue across the printable-area gap instead of ending in it.
+  var down = this.nodeB.y >= this.nodeA.y;
+  var a = choose(this.nodeA, !down), b = choose(this.nodeB, down);
+  return { a: a, b: b };
+};
+
+Link.prototype._visibleCirclePoint = function (node, center, toward, inset, preferredPage) {
+  var radius = nodeRadius;
+  if (!constrainToMargins || typeof pageHeightPx !== "function" || typeof pageWidthPx !== "function") {
+    var vx = toward.x - center.x, vy = toward.y - center.y;
+    var vl = Math.sqrt(vx * vx + vy * vy) || 1;
+    return { x: center.x + vx / vl * radius, y: center.y + vy / vl * radius };
+  }
+  var ph = pageHeightPx();
+  var pad = Math.max(0, inset || 0) + Math.max(1, styleLineWidth || 1);
+  var left = pageMargins.left * PX_PER_INCH + pad;
+  var right = pageWidthPx() - pageMargins.right * PX_PER_INCH - pad;
+  var reach = Math.max(radius, styleStateFontSize * 0.75) + 2;
+  var gap = (pageMargins.top + pageMargins.bottom) * PX_PER_INCH;
+  var circleCenters = [{ x: node.x, y: node.y }];
+  for (var p = 0; p + 1 < pageCount; p++) {
+    var nextTop = (p + 1) * ph + pageMargins.top * PX_PER_INCH;
+    var priorBottom = (p + 1) * ph - pageMargins.bottom * PX_PER_INCH;
+    if (Math.abs(node.y - nextTop) <= reach) circleCenters.push({ x: node.x, y: node.y - gap });
+    if (Math.abs(node.y - priorBottom) <= reach) circleCenters.push({ x: node.x, y: node.y + gap });
+  }
+  preferredPage = preferredPage == null
+    ? Math.max(0, Math.min(pageCount - 1, Math.floor(node.y / ph)))
+    : Math.max(0, Math.min(pageCount - 1, preferredPage));
+  var best = null, bestScore = Infinity;
+  // Check every rendered fragment of a split state, preferring the fragment
+  // at the state's actual page position. That lets an arrow from page 2 attach
+  // to the visible page 1 arc instead of being stuck on its duplicate.
+  circleCenters.forEach(function (circleCenter) {
+    var page = Math.max(0, Math.min(pageCount - 1, Math.floor(circleCenter.y / ph)));
+    var top = page * ph + pageMargins.top * PX_PER_INCH + pad;
+    var bottom = (page + 1) * ph - pageMargins.bottom * PX_PER_INCH - pad;
+    var targetAngle = Math.atan2(toward.y - circleCenter.y, toward.x - circleCenter.x);
+    for (var i = 0; i < 720; i++) {
+      var angle = Math.PI * 2 * i / 720;
+      var x = circleCenter.x + Math.cos(angle) * radius, y = circleCenter.y + Math.sin(angle) * radius;
+      if (x < left || x > right || y < top || y > bottom) continue;
+      var delta = Math.atan2(Math.sin(angle - targetAngle), Math.cos(angle - targetAngle));
+      var score = Math.abs(page - preferredPage) * 100 + delta * delta;
+      if (score < bestScore) { bestScore = score; best = { x: x, y: y }; }
+    }
+  });
+  if (best) return best;
+  var dx = toward.x - center.x, dy = toward.y - center.y, length = Math.sqrt(dx * dx + dy * dy) || 1;
+  return { x: center.x + dx / length * radius, y: center.y + dy / length * radius };
+};
+
+Link.prototype._ensureCurvePoints = function (count, pageBreaks) {
+  var centers = this._linkCenters();
+  var dx = centers.b.x - centers.a.x, dy = centers.b.y - centers.a.y;
+  var length = Math.sqrt(dx * dx + dy * dy) || 1;
+  // Convert saved per-page cubic handles to three whole-link handles. This
+  // keeps imported older links editable while dropping the page-count-based UI.
+  if (Array.isArray(this.curvePoints) && this.curvePoints.length && typeof this.curvePoints[0].t !== "number") {
+    var oldBreaks = pageBreaks || this._curvePageBreaks(centers.a, centers.b);
+    var oldHandles = [];
+    this.curvePoints.forEach(function (seg, i) {
+      if (!seg || !seg.c1 || !seg.c2) return;
+      [seg.c1, seg.c2].forEach(function (point) {
+        var t0 = oldBreaks[i], t1 = oldBreaks[i + 1];
+        var px = centers.a.x + dx * (t0 + (t1 - t0) * point.parallel) - (dy / length) * point.perpendicular;
+        var py = centers.a.y + dy * (t0 + (t1 - t0) * point.parallel) + (dx / length) * point.perpendicular;
+        var t = ((px - centers.a.x) * dx + (py - centers.a.y) * dy) / (length * length);
+        var perp = (dx * (py - centers.a.y) - dy * (px - centers.a.x)) / length;
+        oldHandles.push({ t: t, perpendicular: perp });
+      });
+    });
+    oldHandles.sort(function (a, b) { return a.t - b.t; });
+    this.curvePoints = [0.25, 0.5, 0.75].map(function (target) {
+      if (!oldHandles.length) return { t: target, perpendicular: 0 };
+      var best = oldHandles[0];
+      oldHandles.forEach(function (point) { if (Math.abs(point.t - target) < Math.abs(best.t - target)) best = point; });
+      return { t: target, perpendicular: best.perpendicular };
+    });
+  }
+  if (!Array.isArray(this.curvePoints)) this.curvePoints = [];
+  if (!this.curvePoints.length) {
+    var base = this.perpendicularPart || 0;
+    this.curvePoints = [0.25, 0.5, 0.75].map(function (t) { return { t: t, perpendicular: base * (1 - Math.abs(2 * t - 1)) }; });
+  }
+};
+
+Link.prototype.getCurveHandles = function () {
+  if (!this.perpendicularPart && !this.curvePoints) return [];
+  var centers = this._linkCenters();
+  this._ensureCurvePoints();
+  var dx = centers.b.x - centers.a.x, dy = centers.b.y - centers.a.y;
+  var length = Math.sqrt(dx * dx + dy * dy) || 1;
+  return this.curvePoints.map(function (point, i) {
+    return {
+      x: centers.a.x + dx * point.t - (dy / length) * point.perpendicular,
+      y: centers.a.y + dy * point.t + (dx / length) * point.perpendicular,
+      segment: i,
+    };
+  });
+};
+
+Link.prototype.moveCurveHandle = function (handleIndex, x, y) {
+  var handles = this.getCurveHandles();
+  var handle = handles[handleIndex];
+  if (!handle) return;
+  var centers = this._linkCenters();
+  var dx = centers.b.x - centers.a.x, dy = centers.b.y - centers.a.y;
+  var length2 = dx * dx + dy * dy || 1;
+  if (typeof pageHeightPx === "function") {
+    x = Math.max(2, Math.min(pageWidthPx() - 2, x));
+    y = Math.max(2, Math.min(pageCount * pageHeightPx() - 2, y));
+  }
+  var parallel = ((x - centers.a.x) * dx + (y - centers.a.y) * dy) / length2;
+  var perpendicular = (dx * (y - centers.a.y) - dy * (x - centers.a.x)) / Math.sqrt(length2);
+  var spec = this.curvePoints[handle.segment];
+  spec.t = Math.max(-0.5, Math.min(1.5, parallel));
+  spec.perpendicular = Math.max(-pageHeightPx(), Math.min(pageHeightPx(), perpendicular));
+  this.perpendicularPart = Math.abs(spec.perpendicular) > 0.5 ? this.perpendicularPart || 1 : this.perpendicularPart;
+};
+
+Link.prototype.getAnchorPoint = function () {
+  var dx = this.nodeB.x - this.nodeA.x;
+  var dy = this.nodeB.y - this.nodeA.y;
+  var scale = Math.sqrt(dx * dx + dy * dy);
+  if (scale < 1e-6) return { x: this.nodeA.x, y: this.nodeA.y };
+  var x =
+    this.nodeA.x +
+    dx * this.parallelPart -
+    (dy * this.perpendicularPart) / scale;
+  var y =
+    this.nodeA.y +
+    dy * this.parallelPart +
+    (dx * this.perpendicularPart) / scale;
+  var padding = Math.max(2, styleLineWidth || 1);
+  var maxX = typeof pageWidthPx === "function" ? pageWidthPx() - padding : Infinity;
+  var maxY = typeof pageHeightPx === "function" && typeof pageCount !== "undefined"
+    ? pageHeightPx() * pageCount - padding
+    : Infinity;
+  return {
+    x: Math.max(padding, Math.min(maxX, x)),
+    y: Math.max(padding, Math.min(maxY, y)),
+  };
+};
+
+Link.prototype.setAnchorPoint = function (x, y) {
+  var previousPerpendicular = this.perpendicularPart;
+  var dx = this.nodeB.x - this.nodeA.x;
+  var dy = this.nodeB.y - this.nodeA.y;
+  var scale = Math.sqrt(dx * dx + dy * dy);
+  if (scale < 1e-6) return;
+  if (typeof pageWidthPx === "function" && typeof pageHeightPx === "function") {
+    x = Math.max(2, Math.min(pageWidthPx() - 2, x));
+    y = Math.max(2, Math.min(pageHeightPx() * pageCount - 2, y));
+  }
+  this.parallelPart =
+    (dx * (x - this.nodeA.x) + dy * (y - this.nodeA.y)) / (scale * scale);
+  this.perpendicularPart =
+    (dx * (y - this.nodeA.y) - dy * (x - this.nodeA.x)) / scale;
+  // Dragging the curve itself moves every page segment with the legacy anchor.
+  // Keep the whole-link handles moving with the legacy curve anchor.
+  if (Array.isArray(this.curvePoints) && this.curvePoints.length) {
+    var delta = this.perpendicularPart - previousPerpendicular;
+    this.curvePoints.forEach(function (point) { if (point && typeof point.perpendicular === "number") point.perpendicular += delta; });
+  }
+  // snap to a straight line
+  if (
+    this.parallelPart > 0 &&
+    this.parallelPart < 1 &&
+    Math.abs(this.perpendicularPart) < snapToPadding
+  ) {
+    this.lineAngleAdjust = (this.perpendicularPart < 0) * Math.PI;
+    this.perpendicularPart = 0;
+  }
+};
+
+Link.prototype.getEndPointsAndCircle = function () {
+  if (this.perpendicularPart == 0 && !this.curvePoints) {
+    var midX = (this.nodeA.x + this.nodeB.x) / 2;
+    var midY = (this.nodeA.y + this.nodeB.y) / 2;
+    var start = this.nodeA.closestPointOnCircle(midX, midY);
+    var end = this.nodeB.closestPointOnCircle(midX, midY);
+    return {
+      hasCircle: false,
+      startX: start.x,
+      startY: start.y,
+      endX: end.x,
+      endY: end.y,
+    };
+  }
+  var anchor = this.getAnchorPoint();
+  // A quadratic curve uses the dragged anchor as its control point. Unlike a
+  // circumcircle through the anchor, the curve stays inside the convex hull
+  // of its endpoints and control point, so it cannot balloon off the paper.
+  var centers = this._linkCenters();
+  var a = centers.a, b = centers.b;
+  var handles = this.getCurveHandles();
+  var first = handles[0] || anchor, last = handles[handles.length - 1] || anchor;
+  var ax = first.x - a.x, ay = first.y - a.y;
+  var bx = b.x - last.x, by = b.y - last.y;
+  var al = Math.sqrt(ax * ax + ay * ay), bl = Math.sqrt(bx * bx + by * by);
+  if (al < 1e-6) { ax = b.x - a.x; ay = b.y - a.y; al = Math.sqrt(ax * ax + ay * ay) || 1; }
+  if (bl < 1e-6) { bx = b.x - a.x; by = b.y - a.y; bl = Math.sqrt(bx * bx + by * by) || 1; }
+  var sourcePage = Math.max(0, Math.min(pageCount - 1, Math.floor(a.y / pageHeightPx())));
+  var start = this._visibleCirclePoint(this.nodeA, a, { x: a.x + ax, y: a.y + ay }, 0, sourcePage);
+  // The final route handle selects which visible copy of a split destination
+  // receives the arrowhead. Dragging that handle across a page break switches
+  // between the page fragments instead of locking the tip to the source page.
+  var targetPage = Math.max(0, Math.min(pageCount - 1, Math.floor(last.y / pageHeightPx())));
+  var end = this._visibleCirclePoint(this.nodeB, b, { x: b.x - bx, y: b.y - by }, styleArrowSize || 0, targetPage);
+  var startX = start.x, startY = start.y;
+  var endX = end.x, endY = end.y;
+  // The three route handles shape one continuous curve. Page clipping cuts
+  // that curve at printable boundaries, so the number of pages never adds dots.
+  this._ensureCurvePoints();
+  handles = this.getCurveHandles();
+  var route = [{ x: startX, y: startY }].concat(handles, [{ x: endX, y: endY }]);
+  var segments = [];
+  for (var si = 0; si < route.length - 1; si++) {
+    var previous = route[Math.max(0, si - 1)], current = route[si];
+    var next = route[si + 1], following = route[Math.min(route.length - 1, si + 2)];
+    segments.push({
+      startX: current.x, startY: current.y,
+      endX: next.x, endY: next.y,
+      control1X: current.x + (next.x - previous.x) / 6,
+      control1Y: current.y + (next.y - previous.y) / 6,
+      control2X: next.x - (following.x - current.x) / 6,
+      control2Y: next.y - (following.y - current.y) / 6,
+    });
+  }
+  return {
+    hasCircle: false,
+    hasCurve: true,
+    startX: startX,
+    startY: startY,
+    endX: endX,
+    endY: endY,
+    controlX: anchor.x,
+    controlY: anchor.y,
+    segments: segments,
+  };
+};
+
+Link.prototype.draw = function (c) {
+  var stuff = this.getEndPointsAndCircle();
+  // draw arc
+  c.beginPath();
+  if (stuff.hasCircle) {
+    c.arc(
+      stuff.circleX,
+      stuff.circleY,
+      stuff.circleRadius,
+      stuff.startAngle,
+      stuff.endAngle,
+      stuff.isReversed,
+    );
+  } else if (stuff.hasCurve) {
+    c.moveTo(stuff.startX, stuff.startY);
+    for (var si = 0; si < stuff.segments.length; si++) {
+      var segment = stuff.segments[si];
+      c.bezierCurveTo(segment.control1X, segment.control1Y, segment.control2X, segment.control2Y, segment.endX, segment.endY);
+    }
+  } else {
+    c.moveTo(stuff.startX, stuff.startY);
+    c.lineTo(stuff.endX, stuff.endY);
+  }
+  c.stroke();
+  // draw the head of the arrow
+  if (stuff.hasCurve) {
+    var finalSegment = stuff.segments[stuff.segments.length - 1];
+    var tangentX = stuff.endX - finalSegment.control2X;
+    var tangentY = stuff.endY - finalSegment.control2Y;
+    drawArrow(c, stuff.endX, stuff.endY, Math.atan2(tangentY, tangentX));
+  } else if (stuff.hasCircle) {
+    drawArrow(
+      c,
+      stuff.endX,
+      stuff.endY,
+      stuff.endAngle - stuff.reverseScale * (Math.PI / 2),
+    );
+  } else {
+    drawArrow(
+      c,
+      stuff.endX,
+      stuff.endY,
+      Math.atan2(stuff.endY - stuff.startY, stuff.endX - stuff.startX),
+    );
+  }
+  // draw the text
+  if (stuff.hasCurve) {
+    var middle = stuff.segments[Math.floor(stuff.segments.length / 2)];
+    var textX = (middle.startX + 3 * middle.control1X + 3 * middle.control2X + middle.endX) / 8;
+    var textY = (middle.startY + 3 * middle.control1Y + 3 * middle.control2Y + middle.endY) / 8;
+    var textAngle = Math.atan2(stuff.endY - stuff.startY, stuff.endX - stuff.startX);
+    drawText(c, this.text, textX + this.labelDx, textY + this.labelDy, textAngle, selectedObject == this);
+  } else if (stuff.hasCircle) {
+    var startAngle = stuff.startAngle;
+    var endAngle = stuff.endAngle;
+    if (endAngle < startAngle) {
+      endAngle += Math.PI * 2;
+    }
+    var textAngle = (startAngle + endAngle) / 2 + stuff.isReversed * Math.PI;
+    var textX = stuff.circleX + stuff.circleRadius * Math.cos(textAngle);
+    var textY = stuff.circleY + stuff.circleRadius * Math.sin(textAngle);
+    drawText(
+      c,
+      this.text,
+      textX + this.labelDx,
+      textY + this.labelDy,
+      textAngle,
+      selectedObject == this,
+    );
+  } else {
+    var textX = (stuff.startX + stuff.endX) / 2;
+    var textY = (stuff.startY + stuff.endY) / 2;
+    var textAngle = Math.atan2(
+      stuff.endX - stuff.startX,
+      stuff.startY - stuff.endY,
+    );
+    drawText(
+      c,
+      this.text,
+      textX + this.labelDx,
+      textY + this.labelDy,
+      textAngle + this.lineAngleAdjust,
+      selectedObject == this,
+    );
+  }
+  if (stuff.hasCurve && (c.canvas !== canvas ? includeCurveHandlesInExports : false)) this.drawCurveHandles(c);
+};
+
+Link.prototype.drawCurveHandles = function (c) {
+  var handles = this.getCurveHandles();
+  c.save(); c.fillStyle = "white"; c.strokeStyle = "black"; c.lineWidth = 2;
+  for (var i = 0; i < handles.length; i++) {
+    if (typeof c.drawCurveHandle === "function") c.drawCurveHandle(handles[i].x, handles[i].y, 6);
+    else { c.beginPath(); c.arc(handles[i].x, handles[i].y, 6, 0, Math.PI * 2); c.fill(); c.stroke(); }
+  }
+  c.restore();
+};
+
+Link.prototype.containsPoint = function (x, y, extraTolerance) {
+  var tolerance = hitTargetPadding + (extraTolerance || 0);
+  var stuff = this.getEndPointsAndCircle();
+  if (stuff.hasCircle) {
+    var dx = x - stuff.circleX;
+    var dy = y - stuff.circleY;
+    var distance = Math.sqrt(dx * dx + dy * dy) - stuff.circleRadius;
+    if (Math.abs(distance) < tolerance) {
+      var angle = Math.atan2(dy, dx);
+      var startAngle = stuff.startAngle;
+      var endAngle = stuff.endAngle;
+      if (stuff.isReversed) {
+        var temp = startAngle;
+        startAngle = endAngle;
+        endAngle = temp;
+      }
+      if (endAngle < startAngle) {
+        endAngle += Math.PI * 2;
+      }
+      if (angle < startAngle) {
+        angle += Math.PI * 2;
+      } else if (angle > endAngle) {
+        angle -= Math.PI * 2;
+      }
+      return angle > startAngle && angle < endAngle;
+    }
+  } else if (stuff.hasCurve) {
+    for (var si = 0; si < stuff.segments.length; si++) {
+      var seg = stuff.segments[si], previous = { x: seg.startX, y: seg.startY };
+      for (var i = 1; i <= 24; i++) {
+        var t = i / 24, u = 1 - t;
+        var current = {
+          x: u * u * u * seg.startX + 3 * u * u * t * seg.control1X + 3 * u * t * t * seg.control2X + t * t * t * seg.endX,
+          y: u * u * u * seg.startY + 3 * u * u * t * seg.control1Y + 3 * u * t * t * seg.control2Y + t * t * t * seg.endY,
+        };
+        var dx = current.x - previous.x, dy = current.y - previous.y;
+        var length2 = dx * dx + dy * dy;
+        var percent = length2 ? Math.max(0, Math.min(1, ((x - previous.x) * dx + (y - previous.y) * dy) / length2)) : 0;
+        var distanceX = x - (previous.x + percent * dx), distanceY = y - (previous.y + percent * dy);
+        if (Math.sqrt(distanceX * distanceX + distanceY * distanceY) < tolerance) return true;
+        previous = current;
+      }
+    }
+  } else {
+    var dx = stuff.endX - stuff.startX;
+    var dy = stuff.endY - stuff.startY;
+    var length = Math.sqrt(dx * dx + dy * dy);
+    var percent =
+      (dx * (x - stuff.startX) + dy * (y - stuff.startY)) / (length * length);
+    var distance = (dx * (y - stuff.startY) - dy * (x - stuff.startX)) / length;
+    return percent > 0 && percent < 1 && Math.abs(distance) < tolerance;
+  }
+  return false;
+};
+
+Link.prototype.getCurveHandleAt = function (x, y) {
+  if (!showCurveHandles || this !== selectedObject || (!this.perpendicularPart && !this.curvePoints)) return -1;
+  var handles = this.getCurveHandles();
+  for (var i = handles.length - 1; i >= 0; i--) {
+    var dx = handles[i].x - x, dy = handles[i].y - y;
+    if (dx * dx + dy * dy <= 12 * 12) return i;
+  }
+  return -1;
+};
+
+function Node(x, y) {
+  this.x = x;
+  this.y = y;
+  this.mouseOffsetX = 0;
+  this.mouseOffsetY = 0;
+  this.isAcceptState = false;
+  this.text = "";
+}
+
+Node.prototype.setMouseStart = function (x, y) {
+  this.mouseOffsetX = this.x - x;
+  this.mouseOffsetY = this.y - y;
+};
+
+Node.prototype.setAnchorPoint = function (x, y) {
+  this.x = x + this.mouseOffsetX;
+  this.y = y + this.mouseOffsetY;
+};
+
+Node.prototype.draw = function (c) {
+  // draw the circle
+  c.beginPath();
+  c.arc(this.x, this.y, nodeRadius, 0, 2 * Math.PI, false);
+  c.stroke();
+
+  // draw the text
+  drawText(c, this.text, this.x, this.y, null, selectedObject == this);
+
+  // draw a double circle for an accept state
+  if (this.isAcceptState) {
+    c.beginPath();
+    c.arc(this.x, this.y, nodeRadius - 6, 0, 2 * Math.PI, false);
+    c.stroke();
+  }
+};
+
+Node.prototype.closestPointOnCircle = function (x, y) {
+  var dx = x - this.x;
+  var dy = y - this.y;
+  var scale = Math.sqrt(dx * dx + dy * dy);
+  return {
+    x: this.x + (dx * nodeRadius) / scale,
+    y: this.y + (dy * nodeRadius) / scale,
+  };
+};
+
+Node.prototype.containsPoint = function (x, y, extraTolerance) {
+  var radius = nodeRadius + (extraTolerance || 0);
+  return (
+    (x - this.x) * (x - this.x) + (y - this.y) * (y - this.y) < radius * radius
+  );
+};
+
+function SelfLink(node, mouse) {
+  this.node = node;
+  this.anchorAngle = 0;
+  this.mouseOffsetAngle = 0;
+  this.text = "";
+  this.labelDx = 0;
+  this.labelDy = 0;
+
+  if (mouse) {
+    this.setAnchorPoint(mouse.x, mouse.y);
+  }
+}
+
+SelfLink.prototype.setMouseStart = function (x, y) {
+  this.mouseOffsetAngle =
+    this.anchorAngle - Math.atan2(y - this.node.y, x - this.node.x);
+};
+
+SelfLink.prototype.setAnchorPoint = function (x, y) {
+  this.anchorAngle =
+    Math.atan2(y - this.node.y, x - this.node.x) + this.mouseOffsetAngle;
+  // snap to 90 degrees
+  var snap = Math.round(this.anchorAngle / (Math.PI / 2)) * (Math.PI / 2);
+  if (Math.abs(this.anchorAngle - snap) < 0.1) this.anchorAngle = snap;
+  // keep in the range -pi to pi so our containsPoint() function always works
+  if (this.anchorAngle < -Math.PI) this.anchorAngle += 2 * Math.PI;
+  if (this.anchorAngle > Math.PI) this.anchorAngle -= 2 * Math.PI;
+};
+
+SelfLink.prototype.getEndPointsAndCircle = function () {
+  var circleX = this.node.x + 1.5 * nodeRadius * Math.cos(this.anchorAngle);
+  var circleY = this.node.y + 1.5 * nodeRadius * Math.sin(this.anchorAngle);
+  var circleRadius = 0.75 * nodeRadius;
+  var startAngle = this.anchorAngle - Math.PI * 0.8;
+  var endAngle = this.anchorAngle + Math.PI * 0.8;
+  var startX = circleX + circleRadius * Math.cos(startAngle);
+  var startY = circleY + circleRadius * Math.sin(startAngle);
+  var endX = circleX + circleRadius * Math.cos(endAngle);
+  var endY = circleY + circleRadius * Math.sin(endAngle);
+  return {
+    hasCircle: true,
+    startX: startX,
+    startY: startY,
+    endX: endX,
+    endY: endY,
+    startAngle: startAngle,
+    endAngle: endAngle,
+    circleX: circleX,
+    circleY: circleY,
+    circleRadius: circleRadius,
+  };
+};
+
+SelfLink.prototype.draw = function (c) {
+  var stuff = this.getEndPointsAndCircle();
+  // draw arc
+  c.beginPath();
+  c.arc(
+    stuff.circleX,
+    stuff.circleY,
+    stuff.circleRadius,
+    stuff.startAngle,
+    stuff.endAngle,
+    false,
+  );
+  c.stroke();
+  // draw the text on the loop farthest from the node
+  var textX = stuff.circleX + stuff.circleRadius * Math.cos(this.anchorAngle);
+  var textY = stuff.circleY + stuff.circleRadius * Math.sin(this.anchorAngle);
+  drawText(
+    c,
+    this.text,
+    textX + this.labelDx,
+    textY + this.labelDy,
+    this.anchorAngle,
+    selectedObject == this,
+  );
+  // draw the head of the arrow
+  drawArrow(c, stuff.endX, stuff.endY, stuff.endAngle + Math.PI * 0.4);
+};
+
+SelfLink.prototype.containsPoint = function (x, y, extraTolerance) {
+  var stuff = this.getEndPointsAndCircle();
+  var dx = x - stuff.circleX;
+  var dy = y - stuff.circleY;
+  var distance = Math.sqrt(dx * dx + dy * dy) - stuff.circleRadius;
+  return Math.abs(distance) < hitTargetPadding + (extraTolerance || 0);
+};
+
+function StartLink(node, start) {
+  this.node = node;
+  this.deltaX = 0;
+  this.deltaY = 0;
+  this.text = "";
+  this.labelDx = 0;
+  this.labelDy = 0;
+
+  if (start) {
+    this.setAnchorPoint(start.x, start.y);
+  }
+}
+
+StartLink.prototype.setAnchorPoint = function (x, y) {
+  this.deltaX = x - this.node.x;
+  this.deltaY = y - this.node.y;
+
+  if (Math.abs(this.deltaX) < snapToPadding) {
+    this.deltaX = 0;
+  }
+
+  if (Math.abs(this.deltaY) < snapToPadding) {
+    this.deltaY = 0;
+  }
+};
+
+StartLink.prototype.getEndPoints = function () {
+  // Imported/generated start arrows may omit their anchor offset. A zero
+  // vector also makes closestPointOnCircle divide by zero, so give those
+  // arrows a visible default entry from above the state.
+  if (!isFinite(this.deltaX)) this.deltaX = 0;
+  if (!isFinite(this.deltaY)) this.deltaY = 0;
+  if (Math.sqrt(this.deltaX * this.deltaX + this.deltaY * this.deltaY) < 1e-6) {
+    this.deltaX = 0;
+    this.deltaY = -Math.max(50, nodeRadius * 2);
+  }
+  var startX = this.node.x + this.deltaX;
+  var startY = this.node.y + this.deltaY;
+  var end = this.node.closestPointOnCircle(startX, startY);
+  return {
+    startX: startX,
+    startY: startY,
+    endX: end.x,
+    endY: end.y,
+  };
+};
+
+StartLink.prototype.draw = function (c) {
+  var stuff = this.getEndPoints();
+
+  // draw the line
+  c.beginPath();
+  c.moveTo(stuff.startX, stuff.startY);
+  c.lineTo(stuff.endX, stuff.endY);
+  c.stroke();
+
+  // draw the text at the end without the arrow
+  var textAngle = Math.atan2(
+    stuff.startY - stuff.endY,
+    stuff.startX - stuff.endX,
+  );
+  drawText(
+    c,
+    this.text,
+    stuff.startX + this.labelDx,
+    stuff.startY + this.labelDy,
+    textAngle,
+    selectedObject == this,
+  );
+
+  // draw the head of the arrow
+  drawArrow(c, stuff.endX, stuff.endY, Math.atan2(-this.deltaY, -this.deltaX));
+};
+
+StartLink.prototype.containsPoint = function (x, y, extraTolerance) {
+  var stuff = this.getEndPoints();
+  var dx = stuff.endX - stuff.startX;
+  var dy = stuff.endY - stuff.startY;
+  var length = Math.sqrt(dx * dx + dy * dy);
+  var percent =
+    (dx * (x - stuff.startX) + dy * (y - stuff.startY)) / (length * length);
+  var distance = (dx * (y - stuff.startY) - dy * (x - stuff.startX)) / length;
+  return percent > 0 && percent < 1 && Math.abs(distance) < hitTargetPadding + (extraTolerance || 0);
+};
+
+function TemporaryLink(from, to) {
+  this.from = from;
+  this.to = to;
+}
+
+TemporaryLink.prototype.draw = function (c) {
+  // draw the line
+  c.beginPath();
+  c.moveTo(this.to.x, this.to.y);
+  c.lineTo(this.from.x, this.from.y);
+  c.stroke();
+
+  // draw the head of the arrow
+  drawArrow(
+    c,
+    this.to.x,
+    this.to.y,
+    Math.atan2(this.to.y - this.from.y, this.to.x - this.from.x),
+  );
+};
