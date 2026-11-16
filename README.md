@@ -76,7 +76,7 @@ Infinite automata is welcome as another PR too. Info can be read at page 88 (pag
 
 ## Note for AI usage
 
-For transparency purposes, the bulk of this has been vibecoded by Claude Code and Codex. However, proofs have been made for LaTeX and Typst for margins to the best of my ability, while Lean 4 and Python combined with some personal tests tested DFAs and NFAs for validity. If you find any issues, feel free to make a pull request. I see that I can't raise issues in this project since it is a fork - so I may duplicate this soon so that the public can propose changes if they want.
+For transparency purposes, the bulk of this has been vibecoded by Claude Code, ChatGPT (to generate prompts to give agp, Codex, or Claude), Gemini 3.8 Flash (via agp), Claude Sonnet 4.6 (via agp), and Codex. However, proofs have been made for LaTeX and Typst for margins to the best of my ability, while Lean 4 and Python combined with some personal tests tested DFAs and NFAs for validity. If you find any issues, feel free to make a pull request. I see that I can't raise issues in this project since it is a fork - so I may duplicate this soon so that the public can propose changes if they want.
 
 I do declare this as vibecoded instead of just "Permissive AI Policy" per https://codeberg.org/ethical-foss/ai-free-foss-alternatives#vibecoded since I only hardcode changed HTML and Python here and there. I didn't bother touching JavaScript but did view it sometimes as efforts to figure out where Claude or Codex messed up.
 
