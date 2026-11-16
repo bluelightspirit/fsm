@@ -64,8 +64,9 @@ function clampMarginInches(value, fallback) {
   return value != null && value !== "" && isFinite(v) ? Math.max(0, Math.min(4, v)) : fallback;
 }
 
-function marginsForPage(p) {
-  var last = Math.max(1, pageCount) - 1;
+function marginsForPage(p, totalPages) {
+  var count = typeof totalPages === "number" && totalPages > 0 ? totalPages : pageCount;
+  var last = Math.max(1, count) - 1;
   p = Math.max(0, Math.min(last, Math.round(Number(p)) || 0));
   var m = { top: pageMargins.top, bottom: pageMargins.bottom, left: pageMargins.left, right: pageMargins.right };
   if (pageMarginMode === "edges") {
@@ -78,9 +79,10 @@ function marginsForPage(p) {
   return m;
 }
 
-function allPageMargins() {
+function allPageMargins(totalPages) {
+  var count = typeof totalPages === "number" && totalPages > 0 ? totalPages : pageCount;
   var out = [];
-  for (var p = 0; p < pageCount; p++) out.push(marginsForPage(p));
+  for (var p = 0; p < count; p++) out.push(marginsForPage(p, count));
   return out;
 }
 

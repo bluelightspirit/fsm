@@ -431,16 +431,8 @@ function automataCreateWorkspace(name, generated, alphabet) {
     return an.localeCompare(bn) || a - b;
   });
 
-  var marginLeft = pageMargins.left * PX_PER_INCH;
-  var marginRight = pageMargins.right * PX_PER_INCH;
-  var marginTop = pageMargins.top * PX_PER_INCH;
-  var marginBottom = pageMargins.bottom * PX_PER_INCH;
   var safeX = Math.max(radius + 20, styleStateFontSize * 3.2);
   var safeY = radius + 20;
-  var minX = marginLeft + safeX, maxX = width - marginRight - safeX;
-  var minY = marginTop + safeY, maxY = height - marginBottom - safeY;
-  if (maxX < minX) minX = maxX = width / 2;
-  if (maxY < minY) minY = maxY = height / 2;
   var orderRank = new Array(count);
   stateOrder.forEach(function (state, rank) { orderRank[state] = rank; });
   function displayGeneratedStateName(name, index) {
@@ -455,8 +447,23 @@ function automataCreateWorkspace(name, generated, alphabet) {
     var row = Math.floor(cell / columns);
     var col = cell % columns;
     if (row % 2) col = columns - 1 - col;
+
+    var pm = typeof marginsForPage === "function" ? marginsForPage(page, generatedPages) : pageMargins;
+    var marginLeft = pm.left * PX_PER_INCH;
+    var marginRight = pm.right * PX_PER_INCH;
+    var marginTop = pm.top * PX_PER_INCH;
+    var marginBottom = pm.bottom * PX_PER_INCH;
+    var minX = marginLeft + safeX, maxX = width - marginRight - safeX;
+    var minY = marginTop + safeY, maxY = height - marginBottom - safeY;
+    if (maxX < minX) minX = maxX = width / 2;
+    if (maxY < minY) minY = maxY = height / 2;
+
+    var nodesOnPage = Math.min(count - page * perPage, perPage);
+    var actualRows = Math.ceil(nodesOnPage / columns);
     var x = minX + (columns === 1 ? 0 : (maxX - minX) * col / (columns - 1));
-    var y = page * height + minY + (rows === 1 ? 0 : (maxY - minY) * row / (rows - 1));
+    var y = page * height + (actualRows <= 1
+      ? (minY + maxY) / 2
+      : minY + (maxY - minY) * row / (actualRows - 1));
     return { text: displayGeneratedStateName(node.name, i), isAcceptState: !!node.accepting,
       x: x, y: y };
   });
@@ -571,8 +578,16 @@ function automataCreateWorkspace(name, generated, alphabet) {
     localStorage.setItem("fsm-automata-alphabet-" + newId, generatedAlphabet.join(", "));
   } catch (e) {}
   Workspace.switchTo(newId);
-  var data = { nodes: generatedNodes, links: generatedLinks, style: getStyle(), pages: generatedPages,
-    pageSize: pageSizeKey, margins: pageMarginsForExport(), constrainToMargins: constrainToMargins };
+  var data = {
+    nodes: generatedNodes,
+    links: generatedLinks,
+    style: getStyle(),
+    pages: generatedPages,
+    pageSize: pageSizeKey,
+    margins: typeof pageBaseMarginsForSave === "function" ? pageBaseMarginsForSave() : pageMarginsForExport(),
+    marginSettings: typeof pageMarginSettingsForSave === "function" ? pageMarginSettingsForSave() : null,
+    constrainToMargins: constrainToMargins
+  };
   Workspace.saveActive(data); deserializeState(data);
   History.reset(snapshotJSON()); draw();
   var typeSelect = document.getElementById("automata-type"), alphabetInput = document.getElementById("automata-alphabet");
